@@ -32,10 +32,13 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
+  -H "X-API-Key: $MIZAN_API_KEY" \
   -F "file=@/path/to/contract.pdf" \
   -F "industry=فناوری اطلاعات" \
   -F "employee_count=25"
 ```
+
+> **امنیت:** endpoint `/analyze` نیازمند هدر `X-API-Key` است. در `ENVIRONMENT=development` اگر `MIZAN_API_KEY` تنظیم نشده باشد، endpoint بدون auth باز می‌ماند (فقط برای dev محلی)؛ در `ENVIRONMENT=production` تنظیم `MIZAN_API_KEY` و `CORS_ORIGINS` الزامی است و بدون آن‌ها سرویس اصلاً بالا نمی‌آید.
 
 ### اجرای تست‌ها
 
