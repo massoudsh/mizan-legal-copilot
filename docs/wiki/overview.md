@@ -34,11 +34,9 @@ FastAPI (Python) · Pydantic · pypdf/python-docx برای پارس سند · LL
 جزئیات: [[entities/api-main]], [[entities/risk-engine]].
 
 ## نقاط ریسک باز (فنی، نه محصولی)
-- بدون CI، بدون Dockerfile، بدون license، بدون `requirements-dev.txt`.
-- چک سایز آپلود بعد از خواندن کامل بدنه انجام می‌شود، نه قبل از آن (چک `Content-Length` پیشین هنوز اضافه نشده).
-- `mailto:hello@mizan.ai` در لندینگ placeholder است.
-- truncation ۱۲٬۰۰۰ کاراکتری مستند نشده.
-- جزئیات کامل: [[log]] و بک‌لاگ تسک در ریشه‌ی حساب گیت‌هاب (`TASKS.md`، آیتم‌های P1-11 و P2-8 و P3-6).
+- `mailto:hello@mizan.ai` در لندینگ همچنان placeholder است — منتظر تصمیم صاحب پروژه دربارهٔ ایمیل/کانال تماس واقعی.
+- P1-11 (CI، تست‌ها، upload guard دو-لایه، Dockerfile/compose، `requirements-dev.txt`) و P2-8 (LICENSE) و بخش عمدهٔ P3-6 (fallback mode، مستندسازی truncation) از `TASKS.md` انجام شد.
+- جزئیات کامل: [[log]].
 
 ## پیوندهای مهم
 - ریپو: `github.com/massoudsh/mizan-legal-copilot` (private)

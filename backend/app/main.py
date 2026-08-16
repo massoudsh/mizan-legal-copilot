@@ -7,8 +7,9 @@
 import os
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.document_parser import UnsupportedFileTypeError, extract_text
 from app.risk_engine import analyze_document
@@ -52,6 +53,28 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def reject_oversized_uploads(request: Request, call_next):
+    """رد درخواست‌های آپلود بزرگ بر اساس هدر Content-Length، پیش از این‌که Starlette بدنه‌ی
+    multipart را کامل پارس/بافر کند. این چک قبل از هر خواندن بدنه اجرا می‌شود (سطح middleware،
+    قبل از resolve شدن dependency ها و parse شدن File(...))."""
+    if request.method == "POST" and request.url.path == "/analyze":
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = None
+            if declared_size is not None and declared_size > MAX_UPLOAD_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": f"حجم فایل بیش از حد مجاز است (حداکثر {MAX_UPLOAD_BYTES // (1024 * 1024)}MB)."
+                    },
+                )
+    return await call_next(request)
+
+
 async def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     """Guards state-changing/expensive endpoints. No-op only in explicit local dev without a configured key."""
     if not API_KEY:
@@ -78,6 +101,9 @@ async def analyze(
     if not content:
         raise HTTPException(status_code=400, detail="فایل آپلودشده خالی است.")
     if len(content) > MAX_UPLOAD_BYTES:
+        # چک اصلی روی Content-Length در سطح middleware (reject_oversized_uploads) و قبل از این
+        # خط اجرا می‌شود. این چک دومِ دفاع‌درعمق است برای کلاینت‌هایی که Content-Length
+        # نمی‌فرستند (مثلاً chunked transfer-encoding) یا مقدار آن را نادرست اعلام می‌کنند.
         raise HTTPException(
             status_code=413,
             detail=f"حجم فایل بیش از حد مجاز است (حداکثر {MAX_UPLOAD_BYTES // (1024 * 1024)}MB).",

@@ -10,6 +10,7 @@
 - [PRD — سند محصول](docs/PRD.md)
 - [معماری فنی](docs/ARCHITECTURE.md)
 - [ویکی دانش پروژه](docs/wiki/overview.md) — خلاصهٔ فشردهٔ اجزا/فلوها برای ایجنت‌ها، همیشه به‌روز
+- [LICENSE](LICENSE) — Apache-2.0
 
 ## ساختار پروژه
 
@@ -41,13 +42,25 @@ curl -X POST http://localhost:8000/analyze \
 
 > **امنیت:** endpoint `/analyze` نیازمند هدر `X-API-Key` است. در `ENVIRONMENT=development` اگر `MIZAN_API_KEY` تنظیم نشده باشد، endpoint بدون auth باز می‌ماند (فقط برای dev محلی)؛ در `ENVIRONMENT=production` تنظیم `MIZAN_API_KEY` و `CORS_ORIGINS` الزامی است و بدون آن‌ها سرویس اصلاً بالا نمی‌آید.
 
+> **محدودیت طول سند:** وقتی تحلیل با LLM انجام می‌شود (`LLM_API_KEY` تنظیم‌شده)، فقط **۱۲٬۰۰۰ کاراکتر اول** متن استخراج‌شده به مدل ارسال می‌شود (`backend/app/risk_engine.py`) تا در سقف context/هزینه‌ی مدل بمانیم. برای اسناد طولانی‌تر، بخش‌های بعد از این حد در تحلیل LLM لحاظ نمی‌شوند؛ raw text کامل هنوز برای فراخوانی مستقیم فرمت‌بندی موجود است اما truncate می‌شود. حالت fallback قاعده‌محور (`analysis_mode: "rule_fallback"`) این محدودیت را ندارد و کل متن سند را با regex بررسی می‌کند.
+
 ### اجرای تست‌ها
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
+
+CI (GitHub Actions) این تست‌ها را روی هر push/PR به `main` اجرا می‌کند (`.github/workflows/ci.yml`).
+
+### اجرا با Docker
+
+```bash
+docker compose up --build
+```
+
+سرویس روی `http://localhost:8000` بالا می‌آید (`/health` باید `200` برگرداند). این compose پیش‌فرض‌های dev را ست می‌کند؛ برای production مقادیر `MIZAN_API_KEY`/`CORS_ORIGINS`/`ENVIRONMENT` را از یک secret manager واقعی override کنید (نه commit در `docker-compose.yml`).
 
 ## مشاهده لندینگ
 

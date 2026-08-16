@@ -35,10 +35,12 @@
 - [[concepts/risk-analysis-flow]] — جریان کامل درخواست
 
 ## قراردادها / Edge cases
-- محتوای فایل با `await file.read()` کامل در حافظه بافر می‌شود، **بعد از آن** در برابر `MIZAN_MAX_UPLOAD_BYTES` چک می‌شود — یعنی بدنه قبل از رد شدن به‌طور کامل خوانده شده (هنوز چک `Content-Length` قبل از خواندن انجام نمی‌شود؛ نقطهٔ باقی‌ماندهٔ TASKS.md P1-11).
+- محدودیت حجم آپلود اکنون **دو لایه** است: (۱) middleware سطح ASGI (`reject_oversized_uploads`) هدر `Content-Length` را قبل از پارس‌شدن بدنه‌ی multipart توسط Starlette چک می‌کند و در صورت عبور از `MIZAN_MAX_UPLOAD_BYTES` بلافاصله 413 برمی‌گرداند — بدون این‌که بدنه اصلاً خوانده/بافر شود؛ (۲) چک دوم بعد از `await file.read()` در خود endpoint، به‌عنوان دفاع‌درعمق برای کلاینت‌هایی که `Content-Length` نمی‌فرستند (مثلاً chunked transfer-encoding).
 - بدون rate-limit — فاز بعد.
-- بدون Dockerfile/CI فعلاً.
+- CI (`.github/workflows/ci.yml`) + `backend/Dockerfile` + `docker-compose.yml` (ریشهٔ ریپو، با healthcheck روی `/health`) اضافه شدند.
+- محدودیت طول سند برای LLM: فقط ۱۲٬۰۰۰ کاراکتر اول متن استخراج‌شده به مدل ارسال می‌شود (`risk_engine.py`) — در README مستند شده.
 
 ## منابع کد
-- `backend/app/main.py:36` — endpoint `/analyze`
-- `backend/app/main.py:31` — endpoint `/health`
+- `backend/app/main.py` — endpoint `/analyze`، middleware `reject_oversized_uploads`
+- `backend/app/main.py` — endpoint `/health`
+- `backend/Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml`
