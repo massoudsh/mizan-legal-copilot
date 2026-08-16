@@ -34,13 +34,14 @@ FastAPI (Python) · Pydantic · pypdf/python-docx برای پارس سند · LL
 جزئیات: [[entities/api-main]], [[entities/risk-engine]].
 
 ## نقاط ریسک باز (فنی، نه محصولی)
-- بدون CI، بدون Dockerfile، بدون license.
+- بدون CI، بدون Dockerfile، بدون license، بدون `requirements-dev.txt`.
 - چک سایز آپلود بعد از خواندن کامل بدنه انجام می‌شود، نه قبل از آن (چک `Content-Length` پیشین هنوز اضافه نشده).
 - `mailto:hello@mizan.ai` در لندینگ placeholder است.
-- جزئیات کامل: [[log]] و بک‌لاگ تسک در ریشه‌ی حساب گیت‌هاب (`TASKS.md`، آیتم‌های P1-11 و P3-6).
+- truncation ۱۲٬۰۰۰ کاراکتری مستند نشده.
+- جزئیات کامل: [[log]] و بک‌لاگ تسک در ریشه‌ی حساب گیت‌هاب (`TASKS.md`، آیتم‌های P1-11 و P2-8 و P3-6).
 
 ## پیوندهای مهم
 - ریپو: `github.com/massoudsh/mizan-legal-copilot` (private)
 - PRD: `docs/PRD.md`
 - معماری: `docs/ARCHITECTURE.md`
-- GitHub Wiki: هنوز غیرفعال است — تلاش برای فعال‌سازی خودکار از طریق API ناموفق بود (`has_wiki` toggle نمی‌شود). برای فعال‌سازی: تنظیمات ریپو → تیک «Wikis» → ساخت اولین صفحه (یک‌بار، دستی). بعد از آن این ویکی محلی (`docs/wiki/`) می‌تواند در آن sync شود.
+- GitHub Wiki: فعال و sync شده — `github.com/massoudsh/mizan-legal-copilot/wiki`. محتوای این پوشه (`docs/wiki/`) در آن هم منعکس شده (`Home`, `overview`, `index`, `log`, `schema`, `entities/*`, `concepts/*`).
