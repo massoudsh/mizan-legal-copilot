@@ -43,3 +43,4 @@ FastAPI (Python) · Pydantic · pypdf/python-docx برای پارس سند · LL
 - ریپو: `github.com/massoudsh/mizan-legal-copilot` (private)
 - PRD: `docs/PRD.md`
 - معماری: `docs/ARCHITECTURE.md`
+- GitHub Wiki: هنوز غیرفعال است — تلاش برای فعال‌سازی خودکار از طریق API ناموفق بود (`has_wiki` toggle نمی‌شود). برای فعال‌سازی: تنظیمات ریپو → تیک «Wikis» → ساخت اولین صفحه (یک‌بار، دستی). بعد از آن این ویکی محلی (`docs/wiki/`) می‌تواند در آن sync شود.
