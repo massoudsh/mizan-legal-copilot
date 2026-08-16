@@ -19,4 +19,4 @@
 - `docs/PRD.md` — سند محصول کامل (پرسونا‌ها، مدل ریسک، KPI، نقشه‌راه)
 - `docs/ARCHITECTURE.md` — معماری فنی کامل (شامل فازهای آینده: RAG، Decision Log، Dashboard)
 - بک‌لاگ تسک سطح-پرتفولیو: آیتم‌های `mizan-legal-copilot` در `TASKS.md` — P1-11 و P2-8 و بخش عمدهٔ P3-6 انجام شد؛ باقی‌مانده: جایگزینی ایمیل placeholder در لندینگ (منتظر تصمیم صاحب پروژه)
-- ایشوهای GitHub برای بک‌لاگ آینده: `github.com/massoudsh/mizan-legal-copilot/issues`
+- بک‌لاگ آینده به‌صورت ۱۰ ایشوی GitHub ثبت شد: `github.com/massoudsh/mizan-legal-copilot/issues` (#1 CI blocked، #2 mailto، #3–#5 roadmap v1، #6–#8 roadmap v2، #9 OCR، #10 rate limiting)
