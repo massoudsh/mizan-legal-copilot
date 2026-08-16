@@ -28,9 +28,14 @@
 FastAPI (Python) · Pydantic · pypdf/python-docx برای پارس سند · LLM از طریق env قابل‌تعویض (OpenAI-compatible).
 دیتابیس/storage/RBAC هنوز اضافه نشده‌اند (فاز بعد — نگاه کن `docs/ARCHITECTURE.md` بخش ۴ و ۵).
 
-## نقاط ریسک شناخته‌شده (فنی، نه محصولی)
+## امنیت (اضافه‌شده بعد از MVP اول)
+`/analyze` پشت auth (`X-API-Key` / `MIZAN_API_KEY`) است، CORS به allowlist صریح محدود شده، سقف حجم آپلود (`MIZAN_MAX_UPLOAD_BYTES`) دارد،
+و پرامپت LLM دفاع صریح در برابر prompt injection دارد. در `ENVIRONMENT=production` بدون `MIZAN_API_KEY`/`CORS_ORIGINS` اپ اصلاً بالا نمی‌آید (fail-closed).
+جزئیات: [[entities/api-main]], [[entities/risk-engine]].
+
+## نقاط ریسک باز (فنی، نه محصولی)
 - بدون CI، بدون Dockerfile، بدون license.
-- `main.py` کل بدنهٔ آپلود را با `await file.read()` می‌خواند، قبل از هیچ چک سایزی — می‌تواند حافظه را پر کند.
+- چک سایز آپلود بعد از خواندن کامل بدنه انجام می‌شود، نه قبل از آن (چک `Content-Length` پیشین هنوز اضافه نشده).
 - `mailto:hello@mizan.ai` در لندینگ placeholder است.
 - جزئیات کامل: [[log]] و بک‌لاگ تسک در ریشه‌ی حساب گیت‌هاب (`TASKS.md`، آیتم‌های P1-11 و P3-6).
 

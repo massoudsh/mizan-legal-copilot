@@ -25,8 +25,9 @@
 
 ## قراردادها / Edge cases
 - متن سند به ۱۲٬۰۰۰ کاراکتر اول truncate می‌شود قبل از ارسال به LLM (سند بلندتر بی‌صدا کوتاه می‌شود — بدون هشدار به کاربر؛ نکتهٔ باز در TASKS.md P3-6).
-- خروجی `analysis_mode` تنها راه فعلی برای تشخیص llm واقعی در برابر fallback است؛ در سطح API/لاگ به‌صورت متریک surface نشده (نکتهٔ باز مشابه).
-- هر استثنای غیرمنتظره از LLM (نه فقط خطای HTTP) هم بی‌صدا catch و به fallback سوییچ می‌شود (`except Exception: pass`).
+- خروجی `analysis_mode` (`"llm"`/`"rule_fallback"`) تنها راه فعلی برای تشخیص llm واقعی در برابر fallback در **پاسخ API** است؛ به‌صورت متریک عملیاتی جدا surface نشده (نکتهٔ باز TASKS.md P3-6).
+- شکست LLM (خطای HTTP، JSON نامعتبر، هر استثنای دیگر) دیگر بی‌صدا catch نمی‌شود — با `logger.warning(..., exc_info=True)` ساختاریافته لاگ می‌شود، بعد به fallback سوییچ می‌کند.
+- **دفاع در برابر prompt injection**: `SYSTEM_PROMPT` صریحاً به مدل می‌گوید متن سند را داده بداند نه دستور؛ متن سند در `USER_PROMPT_TEMPLATE` بین دلیمیترهای `<<<DOCUMENT_START>>>`/`<<<DOCUMENT_END>>>` قرار می‌گیرد.
 
 ## منابع کد
 - `backend/app/risk_engine.py:45` — `analyze_document`
