@@ -41,9 +41,21 @@ curl -X POST http://localhost:8000/analyze \
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
+
+### محدودیت نرخ درخواست
+
+endpoint های سنگین (مثل `/analyze`) محدودیت نرخ درون‌حافظه‌ای دارند که با متغیرهای محیطی تنظیم می‌شود:
+
+| متغیر | پیش‌فرض | توضیح |
+|---|---|---|
+| `RATE_LIMIT_REQUESTS` | `10` | تعداد مجاز درخواست در هر پنجره |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | طول پنجره به ثانیه |
+
+در صورت عبور از سقف، پاسخ `429` همراه با هدر `Retry-After` برگردانده می‌شود. این شمارنده‌ها
+در حافظه‌ی پروسه نگه داشته می‌شوند؛ برای استقرار چند-نمونه‌ای باید به فروشگاه مشترک (مثل Redis) منتقل شوند.
 
 ## مشاهده لندینگ
 

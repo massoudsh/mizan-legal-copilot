@@ -5,10 +5,11 @@
 """
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.document_parser import UnsupportedFileTypeError, extract_text
+from app.rate_limit import enforce_rate_limit
 from app.risk_engine import analyze_document
 from app.schemas import OrgProfile, RiskAnalysisResult
 
@@ -33,7 +34,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/analyze", response_model=RiskAnalysisResult)
+@app.post("/analyze", response_model=RiskAnalysisResult, dependencies=[Depends(enforce_rate_limit)])
 async def analyze(
     file: UploadFile = File(..., description="سند/قرارداد (pdf, docx, txt, md)"),
     industry: str | None = Form(default=None),
