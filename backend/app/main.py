@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.document_parser import UnsupportedFileTypeError, extract_text
+from app.rate_limit import enforce_rate_limit
 from app.risk_engine import analyze_document
 from app.schemas import OrgProfile, RiskAnalysisResult
 
