@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # پیش‌فرض‌های dev — برای production این مقادیر را از secret manager/`.env` واقعی override کنید
+      # (ENVIRONMENT=production بدون MIZAN_API_KEY و CORS_ORIGINS اپ را boot نمی‌کند، طبق app/main.py).
+      ENVIRONMENT: development
+      MIZAN_MAX_UPLOAD_BYTES: "15728640"
+      CORS_ORIGINS: "http://localhost:3000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

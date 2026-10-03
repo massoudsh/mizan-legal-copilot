@@ -9,6 +9,8 @@
 
 - [PRD — سند محصول](docs/PRD.md)
 - [معماری فنی](docs/ARCHITECTURE.md)
+- [ویکی دانش پروژه](docs/wiki/overview.md) — خلاصهٔ فشردهٔ اجزا/فلوها برای ایجنت‌ها، همیشه به‌روز
+- [LICENSE](LICENSE) — Apache-2.0
 
 ## ساختار پروژه
 
@@ -32,30 +34,33 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
+  -H "X-API-Key: $MIZAN_API_KEY" \
   -F "file=@/path/to/contract.pdf" \
   -F "industry=فناوری اطلاعات" \
   -F "employee_count=25"
 ```
 
+> **امنیت:** endpoint `/analyze` نیازمند هدر `X-API-Key` است. در `ENVIRONMENT=development` اگر `MIZAN_API_KEY` تنظیم نشده باشد، endpoint بدون auth باز می‌ماند (فقط برای dev محلی)؛ در `ENVIRONMENT=production` تنظیم `MIZAN_API_KEY` و `CORS_ORIGINS` الزامی است و بدون آن‌ها سرویس اصلاً بالا نمی‌آید.
+
+> **محدودیت طول سند:** وقتی تحلیل با LLM انجام می‌شود (`LLM_API_KEY` تنظیم‌شده)، فقط **۱۲٬۰۰۰ کاراکتر اول** متن استخراج‌شده به مدل ارسال می‌شود (`backend/app/risk_engine.py`) تا در سقف context/هزینه‌ی مدل بمانیم. برای اسناد طولانی‌تر، بخش‌های بعد از این حد در تحلیل LLM لحاظ نمی‌شوند؛ raw text کامل هنوز برای فراخوانی مستقیم فرمت‌بندی موجود است اما truncate می‌شود. حالت fallback قاعده‌محور (`analysis_mode: "rule_fallback"`) این محدودیت را ندارد و کل متن سند را با regex بررسی می‌کند.
+
 ### اجرای تست‌ها
 
 ```bash
 cd backend
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
-### محدودیت نرخ درخواست
+CI (GitHub Actions) این تست‌ها را روی هر push/PR به `main` اجرا می‌کند (`.github/workflows/ci.yml`).
 
-endpoint های سنگین (مثل `/analyze`) محدودیت نرخ درون‌حافظه‌ای دارند که با متغیرهای محیطی تنظیم می‌شود:
+### اجرا با Docker
 
-| متغیر | پیش‌فرض | توضیح |
-|---|---|---|
-| `RATE_LIMIT_REQUESTS` | `10` | تعداد مجاز درخواست در هر پنجره |
-| `RATE_LIMIT_WINDOW_SECONDS` | `60` | طول پنجره به ثانیه |
+```bash
+docker compose up --build
+```
 
-در صورت عبور از سقف، پاسخ `429` همراه با هدر `Retry-After` برگردانده می‌شود. این شمارنده‌ها
-در حافظه‌ی پروسه نگه داشته می‌شوند؛ برای استقرار چند-نمونه‌ای باید به فروشگاه مشترک (مثل Redis) منتقل شوند.
+سرویس روی `http://localhost:8000` بالا می‌آید (`/health` باید `200` برگرداند). این compose پیش‌فرض‌های dev را ست می‌کند؛ برای production مقادیر `MIZAN_API_KEY`/`CORS_ORIGINS`/`ENVIRONMENT` را از یک secret manager واقعی override کنید (نه commit در `docker-compose.yml`).
 
 ## مشاهده لندینگ
 
