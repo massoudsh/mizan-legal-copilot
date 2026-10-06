@@ -44,6 +44,29 @@ curl -X POST http://localhost:8000/analyze \
 
 > **محدودیت طول سند:** وقتی تحلیل با LLM انجام می‌شود (`LLM_API_KEY` تنظیم‌شده)، فقط **۱۲٬۰۰۰ کاراکتر اول** متن استخراج‌شده به مدل ارسال می‌شود (`backend/app/risk_engine.py`) تا در سقف context/هزینه‌ی مدل بمانیم. برای اسناد طولانی‌تر، بخش‌های بعد از این حد در تحلیل LLM لحاظ نمی‌شوند؛ raw text کامل هنوز برای فراخوانی مستقیم فرمت‌بندی موجود است اما truncate می‌شود. حالت fallback قاعده‌محور (`analysis_mode: "rule_fallback"`) این محدودیت را ندارد و کل متن سند را با regex بررسی می‌کند.
 
+### قابلیت‌های API
+
+همهٔ endpoint های زیر هدر `X-API-Key` می‌خواهند (به‌جز `/health`) و داده در SQLite (`MIZAN_DATABASE_PATH`) ذخیره می‌شود.
+
+| مسیر | کاربرد |
+|---|---|
+| `POST /analyze` | تحلیل سند (pdf, docx, txt, md و تصویر اسکن‌شده با OCR)؛ با `organization_id` پروفایل ذخیره‌شده اعمال می‌شود |
+| `PUT /organizations/profile` · `GET /organizations/{id}/profile` | پروفایل ماندگار سازمان |
+| `POST /decisions` · `GET /organizations/{id}/decisions` | دفتر تصمیم (audit trail) |
+| `POST /regulations` · `GET /regulations/search` | پایگاه دانش مقررات با تاریخ ابلاغ/اجرا؛ جست‌وجوی تمام‌متن (FTS5) و فیلتر تاریخ اعتبار |
+| `GET /organizations/{id}/dashboard` | نمای تجمیعی ریسک تصمیم‌ها |
+
+**OCR:** برای PDF بدون لایهٔ متنی و تصاویر، Tesseract (زبان‌های `MIZAN_OCR_LANGUAGES`، پیش‌فرض `fas+eng`) و Poppler لازم است؛ در Docker نصب شده‌اند. بدون آن‌ها پاسخ ۴۲۲ برمی‌گردد.
+
+**مقررات در تحلیل:** مقررات معتبر در تاریخ امروز که با متن سند هم‌پوشانی دارند به پرامپت LLM افزوده می‌شوند. بازیابی فعلی کلیدواژه‌ای است؛ جست‌وجوی برداری (pgvector) در نقشهٔ بعدی است.
+
+### مدل تهدید (خلاصه)
+
+- اسناد حساس‌اند: کلید API الزامی در production، محدودیت حجم و نرخ، CORS بدون wildcard.
+- متن سند به LLM صرفاً داده است (دفاع در برابر prompt injection در `risk_engine.py`).
+- هیچ secret ای در مخزن نیست؛ CI با gitleaks بررسی می‌کند و Dependabot وابستگی‌ها را رصد می‌کند.
+- محدودیت‌ها: SQLite تک‌نمونه‌ای است و RBAC/چندمستأجری هنوز پیاده نشده؛ rate limit در حافظهٔ پروسه است.
+
 ### اجرای تست‌ها
 
 ```bash
