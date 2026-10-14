@@ -1,9 +1,9 @@
-"""مدل‌های ورودی/خروجی سرویس تحلیل ریسک میزان."""
+"""Schemas for Mizan's public, tenant-scoped and governance APIs."""
 
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 
 class RiskCategory(str, Enum):
@@ -22,19 +22,51 @@ class RiskLevel(str, Enum):
 
 
 class OrgProfile(BaseModel):
-    industry: str | None = Field(default=None, description="صنعت/جنس کسب‌وکار")
+    industry: str | None = None
     employee_count: int | None = Field(default=None, ge=0)
     contractor_ratio_pct: float | None = Field(default=None, ge=0, le=100)
     monthly_revenue_toman: float | None = Field(default=None, ge=0)
 
 
 class OrganizationProfile(OrgProfile):
-    organization_id: str = Field(min_length=1, max_length=128)
+    organization_id: str
     updated_at: datetime
 
 
 class OrganizationProfileInput(OrgProfile):
-    organization_id: str = Field(min_length=1, max_length=128)
+    pass
+
+
+class OrganizationInput(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+
+
+class UserInput(BaseModel):
+    email: EmailStr
+    role: str = Field(pattern="^(owner|admin|analyst|viewer)$")
+
+
+class UserCreated(BaseModel):
+    id: int
+    organization_id: str
+    email: EmailStr
+    role: str
+    access_token: str
+
+
+class DemoRequestInput(BaseModel):
+    name: str = Field(min_length=2, max_length=150)
+    organization: str = Field(min_length=2, max_length=200)
+    work_email: EmailStr
+    phone: str | None = Field(default=None, max_length=32)
+    employee_count: int | None = Field(default=None, ge=1, le=1_000_000)
+    message: str | None = Field(default=None, max_length=2000)
+    website: str = Field(default="", max_length=0)  # honeypot
+
+
+class DemoRequest(BaseModel):
+    id: int
+    created_at: datetime
 
 
 class RiskFinding(BaseModel):
@@ -56,7 +88,6 @@ class RiskAnalysisResult(BaseModel):
 
 
 class DecisionInput(BaseModel):
-    organization_id: str = Field(min_length=1, max_length=128)
     title: str = Field(min_length=1, max_length=300)
     rationale: str = Field(min_length=1, max_length=10000)
     supporting_document: str | None = Field(default=None, max_length=300)
@@ -71,7 +102,9 @@ class Decision(DecisionInput):
 class RegulationInput(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     body: str = Field(min_length=1, max_length=50000)
-    source_url: str | None = Field(default=None, max_length=2000)
+    source_url: HttpUrl | None = None
+    source_name: str = Field(min_length=2, max_length=200)
+    source_version: str = Field(min_length=1, max_length=100)
     published_on: date | None = None
     effective_from: date | None = None
     effective_to: date | None = None
@@ -82,9 +115,42 @@ class Regulation(RegulationInput):
     created_at: datetime
 
 
+class Alert(BaseModel):
+    id: int
+    title: str
+    body: str
+    created_at: datetime
+    read_at: datetime | None = None
+
+
+class RegulatorySourceInput(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    feed_url: HttpUrl
+
+
+class RegulatorySource(RegulatorySourceInput):
+    id: int
+    enabled: bool
+    last_checked_at: datetime | None = None
+
+
+class ConnectorInput(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    kind: str = Field(pattern="^(hr|finance)$")
+    base_url: HttpUrl
+    secret_reference: str = Field(min_length=3, max_length=200)
+
+
+class Connector(ConnectorInput):
+    id: int
+    enabled: bool
+    created_at: datetime
+
+
 class DashboardSummary(BaseModel):
     organization_id: str
     decision_count: int
     critical_decision_count: int
     risk_distribution: dict[RiskLevel, int]
     recent_decisions: list[Decision]
+    unread_alert_count: int

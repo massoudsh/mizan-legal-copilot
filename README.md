@@ -1,95 +1,62 @@
 # میزان (Mizan)
-### کوپایلوت هوشمند مدیریت ریسک‌های حقوقی و رگولاتوری برای سازمان‌های ایرانی
 
-در ایران فهم قانون کافی نیست؛ سازمان باید بفهمد قانون چطور تفسیر و اجرا می‌شود. میزان لایه‌ای است که قبل از بحران،
-ریسک‌های حقوقی، مالیاتی، تأمین‌اجتماعی و قراردادی را از دل اسناد، تصمیم‌ها و رویه‌های اجرایی قابل مشاهده و قابل
-اقدام می‌کند.
+کوپایلوت مدیریت ریسک‌های حقوقی و رگولاتوری برای سازمان‌های ایرانی.
 
-## مستندات
+## معماری
 
-- [PRD — سند محصول](docs/PRD.md)
-- [معماری فنی](docs/ARCHITECTURE.md)
-- [ویکی دانش پروژه](docs/wiki/overview.md) — خلاصهٔ فشردهٔ اجزا/فلوها برای ایجنت‌ها، همیشه به‌روز
-- [LICENSE](LICENSE) — Apache-2.0
+- `backend/` — FastAPI، OCR، تحلیل ریسک، RBAC و دادهٔ چندمستأجری
+- `landing/` — لندینگ RTL، فرم واقعی درخواست دمو و داشبورد وب
+- `backend/database/postgres.sql` — schema production برای PostgreSQL، RLS و `pgvector`
+- `backend/evals/golden.json` — مجموعهٔ ارزیابی regression برای تحلیل ریسک
 
-## ساختار پروژه
-
-```
-backend/    سرویس MVP تحلیل ریسک (FastAPI) — آپلود سند → تحلیل ریسک
-landing/    صفحه معرفی محصول (استاتیک HTML/CSS)
-docs/       PRD و معماری فنی
-```
-
-## اجرای بک‌اند (MVP)
+## راه‌اندازی محلی
 
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # اختیاری — بدون کلید LLM هم در حالت fallback قاعده‌محور کار می‌کند
+pip install -r requirements-dev.txt
+cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-سپس:
+در production متغیرهای `MIZAN_API_KEY`، `CORS_ORIGINS` و `MIZAN_DATA_ENCRYPTION_KEY` اجباری هستند.
 
-```bash
-curl -X POST http://localhost:8000/analyze \
-  -H "X-API-Key: $MIZAN_API_KEY" \
-  -F "file=@/path/to/contract.pdf" \
-  -F "industry=فناوری اطلاعات" \
-  -F "employee_count=25"
-```
+## امنیت و tenancy
 
-> **امنیت:** endpoint `/analyze` نیازمند هدر `X-API-Key` است. در `ENVIRONMENT=development` اگر `MIZAN_API_KEY` تنظیم نشده باشد، endpoint بدون auth باز می‌ماند (فقط برای dev محلی)؛ در `ENVIRONMENT=production` تنظیم `MIZAN_API_KEY` و `CORS_ORIGINS` الزامی است و بدون آن‌ها سرویس اصلاً بالا نمی‌آید.
+- APIهای سازمانی با `Authorization: Bearer <access token>` محافظت می‌شوند.
+- نقش‌ها: `owner`، `admin`، `analyst` و `viewer`؛ هر query سازمانی تنها با `organization_id` استخراج‌شده از توکن اجرا می‌شود.
+- ساخت سازمان و صدور توکن یک‌بارمصرف کاربر از endpointهای مدیریتی و با `X-API-Key` انجام می‌شود.
+- اطلاعات تماس درخواست دمو با Fernet در SQLite رمزنگاری می‌شوند؛ فقط شناسه و زمان ثبت به client برمی‌گردد.
+- connectorها تنها `secret_reference` نگه می‌دارند، نه secret واقعی.
 
-> **محدودیت طول سند:** وقتی تحلیل با LLM انجام می‌شود (`LLM_API_KEY` تنظیم‌شده)، فقط **۱۲٬۰۰۰ کاراکتر اول** متن استخراج‌شده به مدل ارسال می‌شود (`backend/app/risk_engine.py`) تا در سقف context/هزینه‌ی مدل بمانیم. برای اسناد طولانی‌تر، بخش‌های بعد از این حد در تحلیل LLM لحاظ نمی‌شوند؛ raw text کامل هنوز برای فراخوانی مستقیم فرمت‌بندی موجود است اما truncate می‌شود. حالت fallback قاعده‌محور (`analysis_mode: "rule_fallback"`) این محدودیت را ندارد و کل متن سند را با regex بررسی می‌کند.
+## APIهای اصلی
 
-### قابلیت‌های API
+| مسیر | نقش لازم | کاربرد |
+|---|---|---|
+| `POST /demo-requests` | عمومی | ثبت امن درخواست دمو با honeypot ضداسپم |
+| `POST /admin/organizations` | کلید مدیریتی | ایجاد سازمان |
+| `POST /admin/organizations/{id}/users` | کلید مدیریتی | صدور توکن کاربر و تخصیص نقش |
+| `PUT/GET /profile` | admin+ / همه | پروفایل ریسک tenant |
+| `POST/GET /decisions` | analyst+ / همه | دفتر تصمیم tenant |
+| `POST /analyze` | analyst+ | تحلیل سند در بستر tenant |
+| `POST/GET /regulations` | admin+ / همه | ingestion نسخه‌دار و بازیابی مقررات معتبر |
+| `POST/GET /connectors` | admin | connector مالی یا HR با secret reference |
+| `GET /dashboard` | همه | روند تصمیم‌ها، ریسک‌های بحرانی و هشدارها |
 
-همهٔ endpoint های زیر هدر `X-API-Key` می‌خواهند (به‌جز `/health`) و داده در SQLite (`MIZAN_DATABASE_PATH`) ذخیره می‌شود.
+## RAG و رصد مقررات
 
-| مسیر | کاربرد |
-|---|---|
-| `POST /analyze` | تحلیل سند (pdf, docx, txt, md و تصویر اسکن‌شده با OCR)؛ با `organization_id` پروفایل ذخیره‌شده اعمال می‌شود |
-| `PUT /organizations/profile` · `GET /organizations/{id}/profile` | پروفایل ماندگار سازمان |
-| `POST /decisions` · `GET /organizations/{id}/decisions` | دفتر تصمیم (audit trail) |
-| `POST /regulations` · `GET /regulations/search` | پایگاه دانش مقررات با تاریخ ابلاغ/اجرا؛ جست‌وجوی تمام‌متن (FTS5) و فیلتر تاریخ اعتبار |
-| `GET /organizations/{id}/dashboard` | نمای تجمیعی ریسک تصمیم‌ها |
+در حالت local، بازیابی مقررات با FTS5 و فیلتر بازهٔ اجرا انجام می‌شود. `backend/database/postgres.sql` مسیر production را با `pgvector`، ایندکس HNSW و RLS آماده می‌کند؛ embeddingها باید هنگام ingestion توسط سرویس embedding سازمان پر شوند. منابع معتبر JSON با `POST /regulatory-sources` ثبت و با اجرای زمان‌بندی‌شدهٔ `python -m app.regulatory_sync` پایش می‌شوند؛ تنها hostهای تعریف‌شده در `MIZAN_REGULATORY_SOURCE_HOSTS` مجازند. نسخهٔ تازه برای همهٔ tenantها هشدار ایجاد می‌کند.
 
-**OCR:** برای PDF بدون لایهٔ متنی و تصاویر، Tesseract (زبان‌های `MIZAN_OCR_LANGUAGES`، پیش‌فرض `fas+eng`) و Poppler لازم است؛ در Docker نصب شده‌اند. بدون آن‌ها پاسخ ۴۲۲ برمی‌گردد.
+## Observability و کیفیت
 
-**مقررات در تحلیل:** مقررات معتبر در تاریخ امروز که با متن سند هم‌پوشانی دارند به پرامپت LLM افزوده می‌شوند. بازیابی فعلی کلیدواژه‌ای است؛ جست‌وجوی برداری (pgvector) در نقشهٔ بعدی است.
+- با تنظیم `OTEL_EXPORTER_OTLP_ENDPOINT`، traceهای FastAPI به OTLP صادر می‌شوند.
+- CI شامل lint، تست، gitleaks، Dependabot و artifact SBOM CycloneDX است.
+- ارزیابی regression: `pytest tests/test_evals.py -v`.
 
-### مدل تهدید (خلاصه)
-
-- اسناد حساس‌اند: کلید API الزامی در production، محدودیت حجم و نرخ، CORS بدون wildcard.
-- متن سند به LLM صرفاً داده است (دفاع در برابر prompt injection در `risk_engine.py`).
-- هیچ secret ای در مخزن نیست؛ CI با gitleaks بررسی می‌کند و Dependabot وابستگی‌ها را رصد می‌کند.
-- محدودیت‌ها: SQLite تک‌نمونه‌ای است و RBAC/چندمستأجری هنوز پیاده نشده؛ rate limit در حافظهٔ پروسه است.
-
-### اجرای تست‌ها
+## تست
 
 ```bash
 cd backend
-pip install -r requirements-dev.txt
-python -m pytest tests/ -v
+python -m pytest -v
+ruff check app tests
 ```
-
-CI (GitHub Actions) این تست‌ها را روی هر push/PR به `main` اجرا می‌کند (`.github/workflows/ci.yml`).
-
-### اجرا با Docker
-
-```bash
-docker compose up --build
-```
-
-سرویس روی `http://localhost:8000` بالا می‌آید (`/health` باید `200` برگرداند). این compose پیش‌فرض‌های dev را ست می‌کند؛ برای production مقادیر `MIZAN_API_KEY`/`CORS_ORIGINS`/`ENVIRONMENT` را از یک secret manager واقعی override کنید (نه commit در `docker-compose.yml`).
-
-## مشاهده لندینگ
-
-فایل `landing/index.html` را مستقیماً در مرورگر باز کنید — بدون نیاز به build.
-
-## وضعیت پروژه
-
-نسخه‌ی فعلی، **MVP فاز اول** است: آپلود سند → تحلیل ریسک با LLM قابل‌تعویض (یا fallback قاعده‌محور در نبود کلید API).
-نقشه‌راه کامل در [PRD](docs/PRD.md) آمده است.

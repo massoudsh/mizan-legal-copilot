@@ -1,4 +1,4 @@
-"""SQLite persistence for organization context, decisions, and regulatory knowledge."""
+"""Tenant-scoped SQLite persistence; PostgreSQL/pgvector schema lives in database/postgres.sql."""
 
 import os
 import sqlite3
@@ -6,169 +6,167 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.schemas import (
-    DashboardSummary,
-    Decision,
-    DecisionInput,
-    OrganizationProfile,
-    OrganizationProfileInput,
-    Regulation,
-    RegulationInput,
-    RiskLevel,
-)
+from app.auth import Principal, Role
+from app.crypto import encrypt
+from app.schemas import Connector, ConnectorInput, Decision, DecisionInput, DemoRequest, DemoRequestInput, OrganizationProfile, OrganizationProfileInput, Regulation, RegulationInput, RegulatorySource, RegulatorySourceInput, RiskLevel
 
 DATABASE_PATH = Path(os.getenv("MIZAN_DATABASE_PATH", "mizan.db"))
+_initialized: set[Path] = set()
 
 
-_initialized_paths: set[Path] = set()
-
-
-@contextmanager
-def _connection(*, create_schema: bool = True):
-    if create_schema and DATABASE_PATH not in _initialized_paths:
-        initialize_database()
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    try:
-        yield connection
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def initialize_database() -> None:
-    with _connection(create_schema=False) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS organization_profiles (
-                organization_id TEXT PRIMARY KEY,
-                industry TEXT,
-                employee_count INTEGER,
-                contractor_ratio_pct REAL,
-                monthly_revenue_toman REAL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS decisions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                organization_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                rationale TEXT NOT NULL,
-                supporting_document TEXT,
-                risk_level TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS decisions_organization_created
-            ON decisions(organization_id, created_at DESC);
-            CREATE TABLE IF NOT EXISTS regulations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                body TEXT NOT NULL,
-                source_url TEXT,
-                published_on TEXT,
-                effective_from TEXT,
-                effective_to TEXT,
-                created_at TEXT NOT NULL
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS regulations_fts
-            USING fts5(title, body, content='regulations', content_rowid='id');
-            CREATE TRIGGER IF NOT EXISTS regulations_after_insert AFTER INSERT ON regulations BEGIN
-                INSERT INTO regulations_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS regulations_after_delete AFTER DELETE ON regulations BEGIN
-                INSERT INTO regulations_fts(regulations_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
-            END;
-            CREATE TRIGGER IF NOT EXISTS regulations_after_update AFTER UPDATE ON regulations BEGIN
-                INSERT INTO regulations_fts(regulations_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body);
-                INSERT INTO regulations_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
-            END;
-            """
-        )
-    _initialized_paths.add(DATABASE_PATH)
-
-
-def _now() -> datetime:
+def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def save_profile(value: OrganizationProfileInput) -> OrganizationProfile:
-    now = _now()
-    with _connection() as connection:
-        connection.execute(
-            """INSERT INTO organization_profiles VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(organization_id) DO UPDATE SET industry=excluded.industry,
-            employee_count=excluded.employee_count, contractor_ratio_pct=excluded.contractor_ratio_pct,
-            monthly_revenue_toman=excluded.monthly_revenue_toman, updated_at=excluded.updated_at""",
-            (value.organization_id, value.industry, value.employee_count, value.contractor_ratio_pct, value.monthly_revenue_toman, now.isoformat()),
-        )
-    return OrganizationProfile(**value.model_dump(), updated_at=now)
+@contextmanager
+def connection():
+    if DATABASE_PATH not in _initialized:
+        initialize_database()
+    db = sqlite3.connect(DATABASE_PATH)
+    db.row_factory = sqlite3.Row
+    try:
+        yield db
+        db.commit()
+    finally:
+        db.close()
 
 
-def get_profile(organization_id: str) -> OrganizationProfile | None:
-    with _connection() as connection:
-        row = connection.execute("SELECT * FROM organization_profiles WHERE organization_id = ?", (organization_id,)).fetchone()
+def initialize_database() -> None:
+    if DATABASE_PATH in _initialized:
+        return
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(DATABASE_PATH)
+    try:
+        db.executescript("""
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS organization_profiles (organization_id TEXT PRIMARY KEY REFERENCES organizations(id), industry TEXT, employee_count INTEGER, contractor_ratio_pct REAL, monthly_revenue_toman REAL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), title TEXT NOT NULL, rationale TEXT NOT NULL, supporting_document TEXT, risk_level TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS decisions_org_created ON decisions(organization_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS regulations (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, source_url TEXT, source_name TEXT NOT NULL, source_version TEXT NOT NULL, published_on TEXT, effective_from TEXT, effective_to TEXT, created_at TEXT NOT NULL, UNIQUE(source_name, source_version));
+        CREATE VIRTUAL TABLE IF NOT EXISTS regulations_fts USING fts5(title, body, content='regulations', content_rowid='id');
+        CREATE TRIGGER IF NOT EXISTS regulations_insert AFTER INSERT ON regulations BEGIN INSERT INTO regulations_fts(rowid,title,body) VALUES(new.id,new.title,new.body); END;
+        CREATE TRIGGER IF NOT EXISTS regulations_delete AFTER DELETE ON regulations BEGIN INSERT INTO regulations_fts(regulations_fts,rowid,title,body) VALUES('delete',old.id,old.title,old.body); END;
+        CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT);
+        CREATE TABLE IF NOT EXISTS connectors (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), name TEXT NOT NULL, kind TEXT NOT NULL, base_url TEXT NOT NULL, secret_reference TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS regulatory_sources (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, feed_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_checked_at TEXT);
+        CREATE TABLE IF NOT EXISTS demo_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, organization TEXT NOT NULL, work_email TEXT NOT NULL, phone TEXT, employee_count INTEGER, message TEXT, created_at TEXT NOT NULL);
+        """)
+        db.commit()
+    finally:
+        db.close()
+    _initialized.add(DATABASE_PATH)
+
+
+def create_organization(organization_id: str, name: str) -> None:
+    with connection() as db:
+        db.execute("INSERT INTO organizations(id,name,created_at) VALUES(?,?,?)", (organization_id, name, now().isoformat()))
+
+
+def create_user(organization_id: str, email: str, role: str, token_hash: str) -> int:
+    with connection() as db:
+        result = db.execute("INSERT INTO users(organization_id,email,role,token_hash,created_at) VALUES(?,?,?,?,?)", (organization_id, email, role, token_hash, now().isoformat()))
+    return result.lastrowid
+
+
+def get_principal(token_hash: str) -> Principal | None:
+    with connection() as db:
+        row = db.execute("SELECT id,organization_id,role FROM users WHERE token_hash=?", (token_hash,)).fetchone()
+    return Principal(row["id"], row["organization_id"], Role(row["role"])) if row else None
+
+
+def save_profile(principal: Principal, value: OrganizationProfileInput) -> OrganizationProfile:
+    timestamp = now()
+    with connection() as db:
+        db.execute("""INSERT INTO organization_profiles VALUES(?,?,?,?,?,?) ON CONFLICT(organization_id) DO UPDATE SET industry=excluded.industry,employee_count=excluded.employee_count,contractor_ratio_pct=excluded.contractor_ratio_pct,monthly_revenue_toman=excluded.monthly_revenue_toman,updated_at=excluded.updated_at""", (principal.organization_id, value.industry, value.employee_count, value.contractor_ratio_pct, value.monthly_revenue_toman, timestamp.isoformat()))
+    return OrganizationProfile(organization_id=principal.organization_id, **value.model_dump(), updated_at=timestamp)
+
+
+def get_profile(principal: Principal) -> OrganizationProfile | None:
+    with connection() as db:
+        row = db.execute("SELECT * FROM organization_profiles WHERE organization_id=?", (principal.organization_id,)).fetchone()
     return OrganizationProfile(**dict(row)) if row else None
 
 
-def create_decision(value: DecisionInput) -> Decision:
-    now = _now()
-    with _connection() as connection:
-        cursor = connection.execute(
-            "INSERT INTO decisions (organization_id, title, rationale, supporting_document, risk_level, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (value.organization_id, value.title, value.rationale, value.supporting_document, value.risk_level.value, now.isoformat()),
-        )
-    return Decision(**value.model_dump(), id=cursor.lastrowid, created_at=now)
+def create_decision(principal: Principal, value: DecisionInput) -> Decision:
+    timestamp = now()
+    with connection() as db:
+        result = db.execute("INSERT INTO decisions(organization_id,title,rationale,supporting_document,risk_level,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.title, value.rationale, value.supporting_document, value.risk_level.value, timestamp.isoformat()))
+    return Decision(**value.model_dump(), id=result.lastrowid, created_at=timestamp)
 
 
-def list_decisions(organization_id: str, limit: int = 50) -> list[Decision]:
-    with _connection() as connection:
-        rows = connection.execute("SELECT * FROM decisions WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?", (organization_id, limit)).fetchall()
+def list_decisions(principal: Principal, limit: int = 50) -> list[Decision]:
+    with connection() as db:
+        rows = db.execute("SELECT * FROM decisions WHERE organization_id=? ORDER BY created_at DESC LIMIT ?", (principal.organization_id, limit)).fetchall()
     return [Decision(**dict(row)) for row in rows]
 
 
-def create_regulation(value: RegulationInput) -> Regulation:
-    now = _now()
-    values = value.model_dump()
-    with _connection() as connection:
-        cursor = connection.execute(
-            """INSERT INTO regulations (title, body, source_url, published_on, effective_from, effective_to, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                values["title"],
-                values["body"],
-                values["source_url"],
-                values["published_on"].isoformat() if values["published_on"] else None,
-                values["effective_from"].isoformat() if values["effective_from"] else None,
-                values["effective_to"].isoformat() if values["effective_to"] else None,
-                now.isoformat(),
-            ),
-        )
-    return Regulation(**values, id=cursor.lastrowid, created_at=now)
+def create_regulation(value: RegulationInput) -> tuple[Regulation, bool]:
+    timestamp, values = now(), value.model_dump()
+    with connection() as db:
+        old = db.execute("SELECT source_version FROM regulations WHERE source_name=? ORDER BY id DESC LIMIT 1", (value.source_name,)).fetchone()
+        result = db.execute("INSERT INTO regulations(title,body,source_url,source_name,source_version,published_on,effective_from,effective_to,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (value.title, value.body, str(value.source_url) if value.source_url else None, value.source_name, value.source_version, str(value.published_on) if value.published_on else None, str(value.effective_from) if value.effective_from else None, str(value.effective_to) if value.effective_to else None, timestamp.isoformat()))
+    return Regulation(**values, id=result.lastrowid, created_at=timestamp), bool(old)
 
 
-def search_regulations(query: str, on_date: str | None = None, limit: int = 5) -> list[Regulation]:
-    tokens = dict.fromkeys(token for token in query.split() if len(token) >= 3)
-    terms = " OR ".join('"' + token.replace('"', '""') + '"' for token in list(tokens)[:30])
+def search_regulations(query: str, on_date: str | None, limit: int = 5) -> list[Regulation]:
+    terms = " OR ".join('"' + t.replace('"', '""') + '"' for t in dict.fromkeys(query.split()) if len(t) >= 3)
     if not terms:
         return []
-    with _connection() as connection:
-        rows = connection.execute(
-            """SELECT regulations.* FROM regulations_fts JOIN regulations ON regulations.id = regulations_fts.rowid
-            WHERE regulations_fts MATCH ? AND (? IS NULL OR (effective_from IS NULL OR effective_from <= ?) AND (effective_to IS NULL OR effective_to >= ?))
-            ORDER BY rank LIMIT ?""",
-            (terms, on_date, on_date, on_date, limit),
-        ).fetchall()
+    with connection() as db:
+        rows = db.execute("""SELECT r.* FROM regulations_fts JOIN regulations r ON r.id=regulations_fts.rowid WHERE regulations_fts MATCH ? AND (? IS NULL OR (r.effective_from IS NULL OR r.effective_from<=?) AND (r.effective_to IS NULL OR r.effective_to>=?)) ORDER BY bm25(regulations_fts) LIMIT ?""", (terms, on_date, on_date, on_date, limit)).fetchall()
     return [Regulation(**dict(row)) for row in rows]
 
 
-def dashboard(organization_id: str) -> DashboardSummary:
-    decisions = list_decisions(organization_id)
+
+def create_regulatory_source(value: RegulatorySourceInput) -> RegulatorySource:
+    with connection() as db:
+        result = db.execute("INSERT INTO regulatory_sources(name,feed_url) VALUES(?,?)", (value.name, str(value.feed_url)))
+    return RegulatorySource(id=result.lastrowid, **value.model_dump(), enabled=True)
+
+
+def list_regulatory_sources() -> list[RegulatorySource]:
+    with connection() as db:
+        rows = db.execute("SELECT * FROM regulatory_sources WHERE enabled=1").fetchall()
+    return [RegulatorySource(**dict(row)) for row in rows]
+
+
+def mark_source_checked(source_id: int) -> None:
+    with connection() as db:
+        db.execute("UPDATE regulatory_sources SET last_checked_at=? WHERE id=?", (now().isoformat(), source_id))
+
+def create_alert_for_all(title: str, body: str) -> None:
+    with connection() as db:
+        for row in db.execute("SELECT id FROM organizations").fetchall():
+            db.execute("INSERT INTO alerts(organization_id,title,body,created_at) VALUES(?,?,?,?)", (row["id"], title, body, now().isoformat()))
+
+
+def create_connector(principal: Principal, value: ConnectorInput) -> Connector:
+    timestamp = now()
+    with connection() as db:
+        result = db.execute("INSERT INTO connectors(organization_id,name,kind,base_url,secret_reference,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.name, value.kind, str(value.base_url), value.secret_reference, timestamp.isoformat()))
+    return Connector(**value.model_dump(), id=result.lastrowid, enabled=True, created_at=timestamp)
+
+
+def list_connectors(principal: Principal) -> list[Connector]:
+    with connection() as db:
+        rows = db.execute("SELECT * FROM connectors WHERE organization_id=?", (principal.organization_id,)).fetchall()
+    return [Connector(**dict(row)) for row in rows]
+
+
+def create_demo_request(value: DemoRequestInput) -> DemoRequest:
+    timestamp = now()
+    with connection() as db:
+        result = db.execute("INSERT INTO demo_requests(name,organization,work_email,phone,employee_count,message,created_at) VALUES(?,?,?,?,?,?,?)", (value.name, value.organization, encrypt(str(value.work_email)), encrypt(value.phone), value.employee_count, encrypt(value.message), timestamp.isoformat()))
+    return DemoRequest(id=result.lastrowid, created_at=timestamp)
+
+
+def dashboard(principal: Principal):
+    decisions = list_decisions(principal)
     distribution = {level: 0 for level in RiskLevel}
     for decision in decisions:
         distribution[decision.risk_level] += 1
-    return DashboardSummary(
-        organization_id=organization_id,
-        decision_count=len(decisions),
-        critical_decision_count=distribution[RiskLevel.CRITICAL],
-        risk_distribution=distribution,
-        recent_decisions=decisions[:10],
-    )
+    with connection() as db:
+        unread = db.execute("SELECT count(*) FROM alerts WHERE organization_id=? AND read_at IS NULL", (principal.organization_id,)).fetchone()[0]
+    return decisions, distribution, unread

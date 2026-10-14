@@ -33,6 +33,14 @@ jobs:
       - name: Run tests
         run: pytest -v
 
+      - name: Export SBOM
+        run: pip install cyclonedx-bom && cyclonedx-py environment -o ../sbom.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
   secrets:
     runs-on: ubuntu-latest
     steps:

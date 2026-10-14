@@ -5,6 +5,12 @@ pypdf==4.3.1
 python-docx==1.1.2
 requests==2.32.3
 python-dotenv==1.2.4
+email-validator==2.2.0
+cryptography==43.0.3
+opentelemetry-api==1.28.2
+opentelemetry-sdk==1.28.2
+opentelemetry-exporter-otlp-proto-http==1.28.2
+opentelemetry-instrumentation-fastapi==0.49b2
 pytesseract==0.3.13
 pdf2image==1.17.0
 Pillow==10.4.0

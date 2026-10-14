@@ -93,9 +93,28 @@
       <div class="container audience-grid"><div><div class="eyebrow">برای هر میز تصمیم</div><h2>یک زبان مشترک<br /><span>برای کل سازمان</span></h2><p>میزان فاصلهٔ میان تیم حقوقی، مالی، منابع انسانی و مدیریت را کم می‌کند تا همه با تصویر واحدی تصمیم بگیرند.</p></div><div class="audience-list"><div><strong>مدیرعامل</strong><span>تصویر کلی ریسک بیرونی سازمان</span><b>←</b></div><div><strong>مدیر مالی</strong><span>ریسک مالیاتی و جریمه‌های احتمالی</span><b>←</b></div><div><strong>مدیر منابع انسانی</strong><span>رابطهٔ کار و تأمین اجتماعی</span><b>←</b></div><div><strong>مدیر حقوقی</strong><span>قابلیت اجرا و دفاع‌پذیری قراردادها</span><b>←</b></div></div></div>
     </section>
 
-    <section id="contact" class="contact-section section-shell"><div class="container contact-card"><div class="eyebrow">قدم بعدی را با اطمینان بردارید</div><h2>برای دیدن میزان روی اسناد خودتان آماده‌اید؟</h2><p>با ما در تماس باشید تا یک نمونهٔ واقعی از تحلیل ریسک سازمان شما را بررسی کنیم.</p><a class="button button-primary" href="mailto:hello@mizan.ai">درخواست دمو <span aria-hidden="true">←</span></a></div></section>
+    <section id="contact" class="contact-section section-shell"><div class="container contact-card"><div class="eyebrow">قدم بعدی را با اطمینان بردارید</div><h2>برای دیدن میزان روی اسناد خودتان آماده‌اید؟</h2><p>جزئیات شما فقط برای هماهنگی دمو استفاده می‌شود.</p><form id="demo-form" class="demo-form"><label>نام و نام خانوادگی<input name="name" required minlength="2" autocomplete="name" /></label><label>نام سازمان<input name="organization" required minlength="2" autocomplete="organization" /></label><label>ایمیل کاری<input name="work_email" type="email" required autocomplete="email" /></label><label>تعداد کارکنان<select name="employee_count"><option value="">انتخاب کنید</option><option value="1">۱ تا ۱۰</option><option value="25">۱۱ تا ۵۰</option><option value="100">۵۱ تا ۲۰۰</option><option value="500">بیش از ۲۰۰</option></select></label><label class="honeypot" aria-hidden="true">وب‌سایت<input name="website" tabindex="-1" autocomplete="off" /></label><button class="button button-primary" type="submit">ثبت درخواست <span aria-hidden="true">←</span></button></form><p id="demo-status" class="form-status" role="status"></p></div></section>
   </main>
 
   <footer class="site-footer"><div class="container footer-inner"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">م</span><span>میزان</span></a><span>کوپایلوت هوشمند ریسک حقوقی و رگولاتوری</span><span>© میزان ۱۴۰۳</span></div></footer>
+  <script>
+    document.getElementById("demo-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const status = document.getElementById("demo-status");
+      const payload = Object.fromEntries(new FormData(form));
+      if (!payload.employee_count) delete payload.employee_count;
+      else payload.employee_count = Number(payload.employee_count);
+      status.textContent = "در حال ثبت درخواست…";
+      try {
+        const response = await fetch("/demo-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        if (!response.ok) throw new Error();
+        form.reset();
+        status.textContent = "درخواست شما ثبت شد؛ به‌زودی برای هماهنگی دمو با شما تماس می‌گیریم.";
+      } catch {
+        status.textContent = "ثبت درخواست ممکن نشد. لطفاً دوباره تلاش کنید.";
+      }
+    });
+  </script>
 </body>
 </html>

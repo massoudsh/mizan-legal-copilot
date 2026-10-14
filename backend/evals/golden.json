@@ -1,0 +1,5 @@
+[
+  {"name":"contractor-labor-risk","document":"این قرارداد با پیمانکار و حق الزحمه منعقد می‌شود.","minimum_level":"medium","requires_human_advisor":true},
+  {"name":"termination-clause","document":"فسخ قرارداد و خسارت تاخیر با جریمه همراه است.","minimum_level":"high","requires_human_advisor":true},
+  {"name":"tax-review","document":"فاکتور و مالیات ارزش افزوده باید ثبت شود.","minimum_level":"medium","requires_human_advisor":false}
+]
