@@ -53,6 +53,22 @@ uvicorn app.main:app --reload --port 8000
 - CI شامل lint، تست، gitleaks، Dependabot و artifact SBOM CycloneDX است.
 - ارزیابی regression: `pytest tests/test_evals.py -v`.
 
+## قابلیت‌های متمایز CLM ایرانی
+
+بررسی رقبا نشان داد بازار ایران بیشتر روی پاسخ‌گویی حقوقی و review سند متمرکز است؛ شکاف قابل‌دفاع، workflow سازمانی contract-lifecycle است. پنج قابلیت اضافه‌شده:
+
+1. `POST/GET /obligations` — تعهدات، مالک و سررسید قابل پیگیری.
+2. `POST/GET /reviews` — ارجاع تصمیم به بررسی انسانی و وضعیت approval.
+3. `POST /contract-versions` و `GET /contract-diff` — مقایسهٔ نسخه‌های قرارداد در سطح خط.
+4. `GET /audit-export` — خروجی قابل استناد از تصمیم، review و تعهدات.
+5. `trust_score` و freshness در مقررات — کیفیت منبع در کنار تاریخ اعتبار برای RAG.
+
+این‌ها در کنار درخواست دمو، RBAC، tenant isolation، OCR، connectorهای HR/مالی و داشبورد، میزان را از یک legal chatbot به یک workspace عملیاتی نزدیک می‌کند.
+
+## بررسی ساختار repository
+
+`docs/wiki/` مستندات commit‌شدهٔ repository است و `.noqte/wiki/` context اجرایی پنل؛ این دو نقش متفاوت دارند و حذف یکی بدون مهاجرت integrationها خطرناک است.
+در audit فعلی فایل تکراری اجرایی یا flow بلااستفاده پیدا نشد؛ مسیرهای قدیمی سازمانی با API tenant-scoped جایگزین شده‌اند و هیچ `mailto` placeholder در landing باقی نمانده است.
 ## تست
 
 ```bash

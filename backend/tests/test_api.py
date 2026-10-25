@@ -66,6 +66,20 @@ def test_regulation_version_creates_alert_and_respects_dates():
     assert found.status_code == 200 and found.json()
 
 
-def test_oversize_and_honeypot_are_rejected():
+
+def test_clm_features_cover_obligations_reviews_versions_and_audit_export():
+    headers = tenant()
+    obligation = client.post("/obligations", headers=headers, json={"title": "تمدید بیمه", "description": "ارسال مدارک", "due_on": "2027-01-10"})
+    assert obligation.status_code == 201
+    decision = client.post("/decisions", headers=headers, json={"title": "قرارداد", "rationale": "بررسی حقوقی"}).json()
+    review = client.post("/reviews", headers=headers, json={"decision_id": decision["id"], "reviewer_email": "legal@example.com"})
+    assert review.status_code == 201
+    for version, body in (("1", "بند پرداخت\nبند فسخ"), ("2", "بند پرداخت\nبند فسخ\nبند محرمانگی")):
+        assert client.post("/contract-versions", headers=headers, json={"contract_key": "contract-1", "version": version, "body": body}).status_code == 201
+    diff = client.get("/contract-diff", headers=headers, params={"contract_key": "contract-1", "from_version": "1", "to_version": "2"})
+    assert diff.status_code == 200 and "بند محرمانگی" in diff.json()["added"]
+    exported = client.get("/audit-export", headers=headers)
+    assert exported.status_code == 200 and len(exported.json()["obligations"]) == 1
+
     assert client.post("/analyze", headers=tenant(), files={"file": ("b.txt", b"a" * 1001)}).status_code == 413
     assert client.post("/demo-requests", json={"name": "مینا", "organization": "نمونه", "work_email": "mina@example.com", "website": "spam"}).status_code == 422

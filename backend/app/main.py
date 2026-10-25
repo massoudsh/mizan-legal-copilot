@@ -17,7 +17,7 @@ from app.rate_limit import enforce_rate_limit
 from app.risk_engine import analyze_document
 from app.observability import configure_telemetry
 from app.crypto import _fernet
-from app.schemas import Connector, ConnectorInput, DashboardSummary, Decision, DecisionInput, DemoRequest, DemoRequestInput, OrganizationInput, OrganizationProfile, OrganizationProfileInput, Regulation, RegulationInput, RegulatorySource, RegulatorySourceInput, RiskAnalysisResult, UserCreated, UserInput
+from app.schemas import Connector, ConnectorInput, ContractDiff, ContractVersionInput, DashboardSummary, Decision, DecisionInput, DemoRequest, DemoRequestInput, OrganizationInput, OrganizationProfile, OrganizationProfileInput, Obligation, ObligationInput, Regulation, RegulationInput, RegulatorySource, RegulatorySourceInput, Review, ReviewInput, RiskAnalysisResult, UserCreated, UserInput
 
 load_dotenv()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -123,6 +123,45 @@ def add_decision(value: DecisionInput, principal: Principal = Depends(require_ro
 @app.get("/decisions", response_model=list[Decision])
 def read_decisions(limit: int = Query(50, ge=1, le=200), principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> list[Decision]:
     return storage.list_decisions(principal, limit)
+
+
+@app.post("/obligations", response_model=Obligation, status_code=201)
+def add_obligation(value: ObligationInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> Obligation:
+    return storage.create_obligation(principal, value)
+
+
+@app.get("/obligations", response_model=list[Obligation])
+def obligations(status: str | None = Query(default=None), principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> list[Obligation]:
+    return storage.list_obligations(principal, status)
+
+
+@app.post("/reviews", response_model=Review, status_code=201)
+def add_review(value: ReviewInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> Review:
+    return storage.create_review(principal, value)
+
+
+@app.get("/reviews", response_model=list[Review])
+def reviews(decision_id: int | None = None, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> list[Review]:
+    return storage.list_reviews(principal, decision_id)
+
+
+@app.post("/contract-versions", status_code=201)
+def add_contract_version(value: ContractVersionInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> dict:
+    storage.save_contract_version(principal, value)
+    return {"status": "stored"}
+
+
+@app.get("/contract-diff", response_model=ContractDiff)
+def contract_diff(contract_key: str, from_version: str, to_version: str, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> ContractDiff:
+    try:
+        return storage.diff_contract_versions(principal, contract_key, from_version, to_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/audit-export")
+def audit_export(principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))):
+    return storage.audit_export(principal)
 
 
 @app.post("/regulations", response_model=Regulation, status_code=201)

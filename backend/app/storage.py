@@ -43,8 +43,11 @@ def initialize_database() -> None:
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS organization_profiles (organization_id TEXT PRIMARY KEY REFERENCES organizations(id), industry TEXT, employee_count INTEGER, contractor_ratio_pct REAL, monthly_revenue_toman REAL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), title TEXT NOT NULL, rationale TEXT NOT NULL, supporting_document TEXT, risk_level TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS obligations (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), title TEXT NOT NULL, description TEXT NOT NULL, due_on TEXT NOT NULL, owner_email TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), decision_id INTEGER NOT NULL, reviewer_email TEXT NOT NULL, status TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS contract_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), contract_key TEXT NOT NULL, version TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(organization_id, contract_key, version));
         CREATE INDEX IF NOT EXISTS decisions_org_created ON decisions(organization_id, created_at DESC);
-        CREATE TABLE IF NOT EXISTS regulations (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, source_url TEXT, source_name TEXT NOT NULL, source_version TEXT NOT NULL, published_on TEXT, effective_from TEXT, effective_to TEXT, created_at TEXT NOT NULL, UNIQUE(source_name, source_version));
+        CREATE TABLE IF NOT EXISTS regulations (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, source_url TEXT, source_name TEXT NOT NULL, source_version TEXT NOT NULL, trust_score INTEGER NOT NULL DEFAULT 50, published_on TEXT, effective_from TEXT, effective_to TEXT, created_at TEXT NOT NULL, UNIQUE(source_name, source_version));
         CREATE VIRTUAL TABLE IF NOT EXISTS regulations_fts USING fts5(title, body, content='regulations', content_rowid='id');
         CREATE TRIGGER IF NOT EXISTS regulations_insert AFTER INSERT ON regulations BEGIN INSERT INTO regulations_fts(rowid,title,body) VALUES(new.id,new.title,new.body); END;
         CREATE TRIGGER IF NOT EXISTS regulations_delete AFTER DELETE ON regulations BEGIN INSERT INTO regulations_fts(regulations_fts,rowid,title,body) VALUES('delete',old.id,old.title,old.body); END;
@@ -106,7 +109,7 @@ def create_regulation(value: RegulationInput) -> tuple[Regulation, bool]:
     timestamp, values = now(), value.model_dump()
     with connection() as db:
         old = db.execute("SELECT source_version FROM regulations WHERE source_name=? ORDER BY id DESC LIMIT 1", (value.source_name,)).fetchone()
-        result = db.execute("INSERT INTO regulations(title,body,source_url,source_name,source_version,published_on,effective_from,effective_to,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (value.title, value.body, str(value.source_url) if value.source_url else None, value.source_name, value.source_version, str(value.published_on) if value.published_on else None, str(value.effective_from) if value.effective_from else None, str(value.effective_to) if value.effective_to else None, timestamp.isoformat()))
+        result = db.execute("INSERT INTO regulations(title,body,source_url,source_name,source_version,trust_score,published_on,effective_from,effective_to,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (value.title, value.body, str(value.source_url) if value.source_url else None, value.source_name, value.source_version, value.trust_score, str(value.published_on) if value.published_on else None, str(value.effective_from) if value.effective_from else None, str(value.effective_to) if value.effective_to else None, timestamp.isoformat()))
     return Regulation(**values, id=result.lastrowid, created_at=timestamp), bool(old)
 
 
@@ -142,7 +145,69 @@ def create_alert_for_all(title: str, body: str) -> None:
             db.execute("INSERT INTO alerts(organization_id,title,body,created_at) VALUES(?,?,?,?)", (row["id"], title, body, now().isoformat()))
 
 
-def create_connector(principal: Principal, value: ConnectorInput) -> Connector:
+def create_obligation(principal: Principal, value) -> object:
+    timestamp = now()
+    with connection() as db:
+        result = db.execute("INSERT INTO obligations(organization_id,title,description,due_on,owner_email,status,created_at) VALUES(?,?,?,?,?,?,?)", (principal.organization_id, value.title, value.description, str(value.due_on), str(value.owner_email) if value.owner_email else None, value.status, timestamp.isoformat()))
+    from app.schemas import Obligation
+    return Obligation(**value.model_dump(), id=result.lastrowid, created_at=timestamp)
+
+
+def list_obligations(principal: Principal, status: str | None = None) -> list:
+    with connection() as db:
+        query = "SELECT * FROM obligations WHERE organization_id=?"
+        params = [principal.organization_id]
+        if status:
+            query += " AND status=?"
+            params.append(status)
+        rows = db.execute(query + " ORDER BY due_on", params).fetchall()
+    from app.schemas import Obligation
+    return [Obligation(**dict(row)) for row in rows]
+
+
+def create_review(principal: Principal, value) -> object:
+    timestamp = now()
+    with connection() as db:
+        result = db.execute("INSERT INTO reviews(organization_id,decision_id,reviewer_email,status,note,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.decision_id, str(value.reviewer_email), value.status, value.note, timestamp.isoformat()))
+    from app.schemas import Review
+    return Review(**value.model_dump(), id=result.lastrowid, created_at=timestamp)
+
+
+def list_reviews(principal: Principal, decision_id: int | None = None) -> list:
+    with connection() as db:
+        query = "SELECT * FROM reviews WHERE organization_id=?"
+        params = [principal.organization_id]
+        if decision_id is not None:
+            query += " AND decision_id=?"
+            params.append(decision_id)
+        rows = db.execute(query + " ORDER BY created_at DESC", params).fetchall()
+    from app.schemas import Review
+    return [Review(**dict(row)) for row in rows]
+
+
+def save_contract_version(principal: Principal, value) -> None:
+    with connection() as db:
+        db.execute("INSERT INTO contract_versions(organization_id,contract_key,version,body,created_at) VALUES(?,?,?,?,?)", (principal.organization_id, value.contract_key, value.version, value.body, now().isoformat()))
+
+
+def diff_contract_versions(principal: Principal, contract_key: str, from_version: str, to_version: str):
+    import difflib
+    with connection() as db:
+        rows = db.execute("SELECT version,body FROM contract_versions WHERE organization_id=? AND contract_key=? AND version IN (?,?)", (principal.organization_id, contract_key, from_version, to_version)).fetchall()
+    bodies = {row["version"]: row["body"].splitlines() for row in rows}
+    if set(bodies) != {from_version, to_version}:
+        raise ValueError("نسخهٔ قرارداد یافت نشد.")
+    diff = list(difflib.ndiff(bodies[from_version], bodies[to_version]))
+    from app.schemas import ContractDiff
+    return ContractDiff(contract_key=contract_key, from_version=from_version, to_version=to_version, added=[x[2:] for x in diff if x.startswith("+ ")], removed=[x[2:] for x in diff if x.startswith("- ")])
+
+
+def audit_export(principal: Principal):
+    from app.schemas import AuditExport
+    return AuditExport(organization_id=principal.organization_id, generated_at=now(), decisions=list_decisions(principal), reviews=list_reviews(principal), obligations=list_obligations(principal))
+
+
+
     timestamp = now()
     with connection() as db:
         result = db.execute("INSERT INTO connectors(organization_id,name,kind,base_url,secret_reference,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.name, value.kind, str(value.base_url), value.secret_reference, timestamp.isoformat()))

@@ -105,6 +105,7 @@ class RegulationInput(BaseModel):
     source_url: HttpUrl | None = None
     source_name: str = Field(min_length=2, max_length=200)
     source_version: str = Field(min_length=1, max_length=100)
+    trust_score: int = Field(default=50, ge=0, le=100)
     published_on: date | None = None
     effective_from: date | None = None
     effective_to: date | None = None
@@ -132,6 +133,53 @@ class RegulatorySource(RegulatorySourceInput):
     id: int
     enabled: bool
     last_checked_at: datetime | None = None
+
+
+class ObligationInput(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    description: str = Field(min_length=1, max_length=5000)
+    due_on: date
+    owner_email: EmailStr | None = None
+    status: str = Field(default="open", pattern="^(open|in_progress|done|overdue)$")
+
+
+class Obligation(ObligationInput):
+    id: int
+    created_at: datetime
+
+
+class ReviewInput(BaseModel):
+    decision_id: int
+    reviewer_email: EmailStr
+    status: str = Field(default="pending", pattern="^(pending|approved|rejected)$")
+    note: str | None = Field(default=None, max_length=5000)
+
+
+class Review(ReviewInput):
+    id: int
+    created_at: datetime
+
+
+class ContractVersionInput(BaseModel):
+    contract_key: str = Field(min_length=1, max_length=200)
+    version: str = Field(min_length=1, max_length=50)
+    body: str = Field(min_length=1, max_length=100000)
+
+
+class ContractDiff(BaseModel):
+    contract_key: str
+    from_version: str
+    to_version: str
+    added: list[str]
+    removed: list[str]
+
+
+class AuditExport(BaseModel):
+    organization_id: str
+    generated_at: datetime
+    decisions: list[Decision]
+    reviews: list[Review]
+    obligations: list[Obligation]
 
 
 class ConnectorInput(BaseModel):
