@@ -60,8 +60,12 @@ uvicorn app.main:app --reload --port 8000
 1. `POST/GET /obligations` — تعهدات، مالک و سررسید قابل پیگیری.
 2. `POST/GET /reviews` — ارجاع تصمیم به بررسی انسانی و وضعیت approval.
 3. `POST /contract-versions` و `GET /contract-diff` — مقایسهٔ نسخه‌های قرارداد در سطح خط.
-4. `GET /audit-export` — خروجی قابل استناد از تصمیم، review و تعهدات.
-5. `trust_score` و freshness در مقررات — کیفیت منبع در کنار تاریخ اعتبار برای RAG.
+4. `GET /audit-export` — خروجی کامل تصمیم‌ها، review و تعهدات، بدون سقف ۵۰ رکورد.
+5. `trust_score` در مقررات — امتیاز ثبت‌شدهٔ کیفیت منبع در کنار تاریخ اعتبار؛ این امتیاز ارزیابی خودکار اعتبار نیست.
+
+بررسی جدید همیشه `pending` است و فقط به کاربر عضو همان سازمان با نقش قابل‌نوشتن ارجاع می‌شود. `PUT /reviews/{id}` فقط برای بررسی‌کنندهٔ تعیین‌شده مجاز است و نتیجهٔ `approved` یا `rejected` نهایی می‌ماند؛ تغییر مجدد پاسخ ۴۰۹ می‌دهد. `PUT /obligations/{id}/status` وضعیت تعهد را در محدودهٔ همان tenant تغییر می‌دهد. داشبورد وب این کنترل‌ها و دانلود حسابرسی را با توجه به هویت `GET /me` نمایش می‌دهد.
+
+در شروع سرویس، دیتابیس‌های موجود فاقد `trust_score` بدون حذف داده با مقدار پیش‌فرض ۵۰ ارتقا می‌یابند. اتصال‌های SQLite همگی foreign key را اعمال می‌کنند.
 
 این‌ها در کنار درخواست دمو، RBAC، tenant isolation، OCR، connectorهای HR/مالی و داشبورد، میزان را از یک legal chatbot به یک workspace عملیاتی نزدیک می‌کند.
 
@@ -76,3 +80,5 @@ cd backend
 python -m pytest -v
 ruff check app tests
 ```
+
+تست‌های داشبورد بدون مرورگر، از ریشهٔ پروژه: `node --test landing/dashboard.test.cjs`.

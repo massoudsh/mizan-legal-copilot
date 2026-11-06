@@ -151,13 +151,23 @@ class Obligation(ObligationInput):
 class ReviewInput(BaseModel):
     decision_id: int
     reviewer_email: EmailStr
-    status: str = Field(default="pending", pattern="^(pending|approved|rejected)$")
+    status: str = Field(default="pending", pattern="^pending$")
     note: str | None = Field(default=None, max_length=5000)
 
 
 class Review(ReviewInput):
+    status: str = Field(pattern="^(pending|approved|rejected)$")
     id: int
     created_at: datetime
+
+
+class ReviewResolution(BaseModel):
+    status: str = Field(pattern="^(approved|rejected)$")
+    note: str | None = Field(default=None, max_length=5000)
+
+
+class ObligationStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(open|in_progress|done|overdue)$")
 
 
 class ContractVersionInput(BaseModel):

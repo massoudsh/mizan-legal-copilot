@@ -23,6 +23,7 @@ def connection():
     if DATABASE_PATH not in _initialized:
         initialize_database()
     db = sqlite3.connect(DATABASE_PATH)
+    db.execute("PRAGMA foreign_keys = ON")
     db.row_factory = sqlite3.Row
     try:
         yield db
@@ -56,6 +57,9 @@ def initialize_database() -> None:
         CREATE TABLE IF NOT EXISTS regulatory_sources (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, feed_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_checked_at TEXT);
         CREATE TABLE IF NOT EXISTS demo_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, organization TEXT NOT NULL, work_email TEXT NOT NULL, phone TEXT, employee_count INTEGER, message TEXT, created_at TEXT NOT NULL);
         """)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(regulations)")}
+        if "trust_score" not in columns:
+            db.execute("ALTER TABLE regulations ADD COLUMN trust_score INTEGER NOT NULL DEFAULT 50")
         db.commit()
     finally:
         db.close()
@@ -79,6 +83,12 @@ def get_principal(token_hash: str) -> Principal | None:
     return Principal(row["id"], row["organization_id"], Role(row["role"])) if row else None
 
 
+def get_identity(principal: Principal) -> dict:
+    with connection() as db:
+        row = db.execute("SELECT email,role,organization_id FROM users WHERE id=? AND organization_id=?", (principal.user_id, principal.organization_id)).fetchone()
+    return dict(row)
+
+
 def save_profile(principal: Principal, value: OrganizationProfileInput) -> OrganizationProfile:
     timestamp = now()
     with connection() as db:
@@ -99,9 +109,14 @@ def create_decision(principal: Principal, value: DecisionInput) -> Decision:
     return Decision(**value.model_dump(), id=result.lastrowid, created_at=timestamp)
 
 
-def list_decisions(principal: Principal, limit: int = 50) -> list[Decision]:
+def list_decisions(principal: Principal, limit: int | None = 50) -> list[Decision]:
     with connection() as db:
-        rows = db.execute("SELECT * FROM decisions WHERE organization_id=? ORDER BY created_at DESC LIMIT ?", (principal.organization_id, limit)).fetchall()
+        query = "SELECT * FROM decisions WHERE organization_id=? ORDER BY created_at DESC, id DESC"
+        params = [principal.organization_id]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = db.execute(query, params).fetchall()
     return [Decision(**dict(row)) for row in rows]
 
 
@@ -168,9 +183,44 @@ def list_obligations(principal: Principal, status: str | None = None) -> list:
 def create_review(principal: Principal, value) -> object:
     timestamp = now()
     with connection() as db:
+        decision = db.execute("SELECT id FROM decisions WHERE organization_id=? AND id=?", (principal.organization_id, value.decision_id)).fetchone()
+        if decision is None:
+            raise LookupError("تصمیم یافت نشد.")
+        reviewer = db.execute("SELECT role FROM users WHERE organization_id=? AND email=? COLLATE NOCASE", (principal.organization_id, str(value.reviewer_email))).fetchone()
+        if reviewer is None:
+            raise LookupError("بررسی‌کنندهٔ عضو سازمان یافت نشد.")
+        if reviewer["role"] == "viewer":
+            raise PermissionError("بررسی‌کننده باید مجوز ثبت نتیجه داشته باشد.")
         result = db.execute("INSERT INTO reviews(organization_id,decision_id,reviewer_email,status,note,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.decision_id, str(value.reviewer_email), value.status, value.note, timestamp.isoformat()))
     from app.schemas import Review
     return Review(**value.model_dump(), id=result.lastrowid, created_at=timestamp)
+
+
+def resolve_review(principal: Principal, review_id: int, value):
+    from app.schemas import Review
+    with connection() as db:
+        row = db.execute("SELECT * FROM reviews WHERE organization_id=? AND id=?", (principal.organization_id, review_id)).fetchone()
+        if row is None:
+            raise LookupError("بررسی یافت نشد.")
+        user = db.execute("SELECT email FROM users WHERE organization_id=? AND id=?", (principal.organization_id, principal.user_id)).fetchone()
+        if user is None or user["email"].casefold() != row["reviewer_email"].casefold():
+            raise PermissionError("فقط بررسی‌کنندهٔ تعیین‌شده می‌تواند نتیجه را ثبت کند.")
+        if row["status"] != "pending":
+            raise ValueError("بررسی قبلاً نهایی شده است.")
+        result = db.execute("UPDATE reviews SET status=?,note=? WHERE organization_id=? AND id=? AND status='pending'", (value.status, value.note, principal.organization_id, review_id))
+        if result.rowcount != 1:
+            raise ValueError("بررسی قبلاً نهایی شده است.")
+    return Review(**{**dict(row), "status": value.status, "note": value.note})
+
+
+def update_obligation_status(principal: Principal, obligation_id: int, status: str):
+    from app.schemas import Obligation
+    with connection() as db:
+        row = db.execute("SELECT * FROM obligations WHERE organization_id=? AND id=?", (principal.organization_id, obligation_id)).fetchone()
+        if row is None:
+            raise LookupError("تعهد یافت نشد.")
+        db.execute("UPDATE obligations SET status=? WHERE organization_id=? AND id=?", (status, principal.organization_id, obligation_id))
+    return Obligation(**{**dict(row), "status": status})
 
 
 def list_reviews(principal: Principal, decision_id: int | None = None) -> list:
@@ -204,10 +254,10 @@ def diff_contract_versions(principal: Principal, contract_key: str, from_version
 
 def audit_export(principal: Principal):
     from app.schemas import AuditExport
-    return AuditExport(organization_id=principal.organization_id, generated_at=now(), decisions=list_decisions(principal), reviews=list_reviews(principal), obligations=list_obligations(principal))
+    return AuditExport(organization_id=principal.organization_id, generated_at=now(), decisions=list_decisions(principal, limit=None), reviews=list_reviews(principal), obligations=list_obligations(principal))
 
 
-
+def create_connector(principal: Principal, value: ConnectorInput) -> Connector:
     timestamp = now()
     with connection() as db:
         result = db.execute("INSERT INTO connectors(organization_id,name,kind,base_url,secret_reference,created_at) VALUES(?,?,?,?,?,?)", (principal.organization_id, value.name, value.kind, str(value.base_url), value.secret_reference, timestamp.isoformat()))
@@ -228,7 +278,7 @@ def create_demo_request(value: DemoRequestInput) -> DemoRequest:
 
 
 def dashboard(principal: Principal):
-    decisions = list_decisions(principal)
+    decisions = list_decisions(principal, limit=None)
     distribution = {level: 0 for level in RiskLevel}
     for decision in decisions:
         distribution[decision.risk_level] += 1

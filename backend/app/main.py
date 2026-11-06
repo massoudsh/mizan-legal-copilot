@@ -1,6 +1,7 @@
 """Mizan API: public demo requests and tenant-isolated risk operations."""
 
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date
 from uuid import uuid4
@@ -17,6 +18,7 @@ from app.rate_limit import enforce_rate_limit
 from app.risk_engine import analyze_document
 from app.observability import configure_telemetry
 from app.crypto import _fernet
+from app.schemas import ObligationStatusUpdate, ReviewResolution
 from app.schemas import Connector, ConnectorInput, ContractDiff, ContractVersionInput, DashboardSummary, Decision, DecisionInput, DemoRequest, DemoRequestInput, OrganizationInput, OrganizationProfile, OrganizationProfileInput, Obligation, ObligationInput, Regulation, RegulationInput, RegulatorySource, RegulatorySourceInput, Review, ReviewInput, RiskAnalysisResult, UserCreated, UserInput
 
 load_dotenv()
@@ -56,6 +58,11 @@ async def limit_upload_size(request: Request, call_next):
 async def require_platform_key(x_api_key: str | None = Header(default=None)) -> None:
     if not API_KEY or x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="کلید مدیریتی نامعتبر است.")
+
+
+@app.exception_handler(sqlite3.IntegrityError)
+async def integrity_error(request: Request, exc: sqlite3.IntegrityError):
+    return JSONResponse(status_code=409, content={"detail": "اطلاعات تکراری یا مرجع نامعتبر است."})
 
 
 @app.get("/health")
@@ -102,6 +109,11 @@ async def analyze(file: UploadFile = File(...), principal: Principal = Depends(r
     return analyze_document(file.filename or "document", text, profile, regulations)
 
 
+@app.get("/me")
+def identity(principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> dict:
+    return storage.get_identity(principal)
+
+
 @app.put("/profile", response_model=OrganizationProfile)
 def upsert_profile(value: OrganizationProfileInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN))) -> OrganizationProfile:
     return storage.save_profile(principal, value)
@@ -137,7 +149,32 @@ def obligations(status: str | None = Query(default=None), principal: Principal =
 
 @app.post("/reviews", response_model=Review, status_code=201)
 def add_review(value: ReviewInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> Review:
-    return storage.create_review(principal, value)
+    try:
+        return storage.create_review(principal, value)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.put("/reviews/{review_id}", response_model=Review)
+def resolve_review(review_id: int, value: ReviewResolution, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> Review:
+    try:
+        return storage.resolve_review(principal, review_id, value)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.put("/obligations/{obligation_id}/status", response_model=Obligation)
+def update_obligation_status(obligation_id: int, value: ObligationStatusUpdate, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST))) -> Obligation:
+    try:
+        return storage.update_obligation_status(principal, obligation_id, value.status)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/reviews", response_model=list[Review])
