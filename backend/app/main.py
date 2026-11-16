@@ -4,12 +4,14 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import storage
 from app.auth import Principal, Role, new_token, require_role, token_digest
@@ -42,6 +44,15 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Mizan API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in origins.split(",") if x.strip()] or ["http://localhost:3000"], allow_credentials=False, allow_methods=["GET", "POST", "PUT"], allow_headers=["Content-Type", "Authorization", "X-API-Key"])
 configure_telemetry(app)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    return response
 
 
 @app.middleware("http")
@@ -238,3 +249,25 @@ def connectors(principal: Principal = Depends(require_role(Role.OWNER, Role.ADMI
 def dashboard(principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN, Role.ANALYST, Role.VIEWER))) -> DashboardSummary:
     decisions, distribution, unread = storage.dashboard(principal)
     return DashboardSummary(organization_id=principal.organization_id, decision_count=len(decisions), critical_decision_count=distribution.get("critical", 0), risk_distribution=distribution, recent_decisions=decisions[:10], unread_alert_count=unread)
+
+
+def _landing_directory() -> Path | None:
+    """Locate the static site relative to a repo checkout or the container image."""
+    configured = os.getenv("MIZAN_LANDING_DIR")
+    candidates = [Path(configured)] if configured else []
+    candidates.extend([Path(__file__).resolve().parents[1] / "landing", Path(__file__).resolve().parents[2] / "landing"])
+    return next((path for path in candidates if (path / "index.html").is_file()), None)
+
+
+class LandingFiles(StaticFiles):
+    """Serve the marketing site and dashboard, but never test or source metadata files."""
+
+    async def get_response(self, path: str, scope):
+        if path.endswith((".cjs", ".md", ".json")):
+            return PlainTextResponse("Not Found", status_code=404)
+        return await super().get_response(path, scope)
+
+
+LANDING_DIR = _landing_directory()
+if LANDING_DIR is not None:
+    app.mount("/", LandingFiles(directory=LANDING_DIR, html=True), name="landing")

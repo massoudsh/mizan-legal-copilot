@@ -82,3 +82,64 @@ ruff check app tests
 ```
 
 تست‌های داشبورد بدون مرورگر، از ریشهٔ پروژه: `node --test landing/dashboard.test.cjs`.
+
+## Docker
+
+One image serves the API, the landing page at `/`, and the dashboard at `/dashboard.html`, so the demo form posts same-origin without CORS.
+
+### Run it
+
+```bash
+cp backend/.env.example backend/.env      # compose reads this file
+docker compose up --build -d
+curl -fsS http://localhost:8000/health
+```
+
+Open <http://localhost:8000> for the site and <http://localhost:8000/dashboard.html> for the dashboard. Set `MIZAN_PORT` to publish a different host port.
+
+SQLite lives in the `mizan-data` volume at `/data/mizan.db`, so `docker compose down` keeps data; `docker compose down -v` deletes it.
+
+### Production settings
+
+Generate a Fernet key for demo-contact encryption:
+
+```bash
+docker compose run --rm --no-deps api python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Then set these values in `backend/.env` and recreate the container:
+
+```dotenv
+ENVIRONMENT=production
+MIZAN_API_KEY=<long random value>
+MIZAN_DATA_ENCRYPTION_KEY=<fernet key>
+CORS_ORIGINS=https://your-domain.example
+```
+
+`docker compose up -d --force-recreate api` fails fast if a required value is missing.
+
+### Bootstrap an organization and its first user
+
+```bash
+export MIZAN_API_KEY=<your key>
+ORG=$(curl -fsS -X POST http://localhost:8000/admin/organizations \
+  -H "X-API-Key: $MIZAN_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"ACME"}' | python -c 'import json,sys;print(json.load(sys.stdin)["organization_id"])')
+
+curl -fsS -X POST "http://localhost:8000/admin/organizations/$ORG/users" \
+  -H "X-API-Key: $MIZAN_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"email":"owner@example.com","role":"owner"}'
+```
+
+The response contains a one-time bearer token; only its hash is stored.
+
+### Operate it
+
+```bash
+docker compose logs -f api                                      # logs
+docker compose --profile jobs run --rm regulatory-sync          # one regulation sync pass
+docker compose up -d --build                                    # rebuild after code changes
+docker compose exec api python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read())"
+```
+
+The image runs as the unprivileged `mizan` user, installs Tesseract (`fas+eng`) and Poppler for OCR, and includes a `HEALTHCHECK` on `/health`. `.dockerignore` keeps tests, `.env`, and agent metadata out of the build context.

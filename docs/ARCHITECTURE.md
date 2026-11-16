@@ -101,3 +101,14 @@
 
 این پیاده‌سازی نقطه‌ی شروع فاز MVP بخش «آپلود قرارداد → تحلیل ریسک» است؛ نسخهٔ اولیهٔ پایگاه دانش مقررات (کلیدواژه‌ای، با حساسیت به تاریخ اجرا)، Decision Log و داشبورد تجمیعی اضافه شده‌اند.
 جست‌وجوی برداری (pgvector)، رصد خودکار ابلاغیه‌ها، یکپارچه‌سازی با سامانه‌های داخلی و RBAC در فازهای بعدی‌اند.
+
+## ۷. استقرار با Docker
+
+یک image واحد هم API و هم سایت استاتیک را سرو می‌کند:
+
+- `backend/Dockerfile` — بر پایهٔ `python:3.11-slim-bookworm`، نصب Tesseract (`fas+eng`) و Poppler، اجرا با کاربر غیرمجاز `mizan` و `HEALTHCHECK` روی `/health`.
+- `docker-compose.yml` — context برابر ریشهٔ مخزن است تا هم `backend/app` و هم `landing/` در image کپی شوند؛ دیتابیس SQLite در volume نام‌دار `mizan-data` روی `/data/mizan.db` می‌ماند.
+- `app/main.py` — مسیر `landing/` را از `MIZAN_LANDING_DIR` یا موقعیت فایل پیدا می‌کند و آن را در `/` mount می‌کند؛ فایل‌های تست و متادیتا با `LandingFiles` مسدود می‌شوند و routeهای API همچنان اولویت دارند.
+- `.dockerignore` — تست‌ها، `.env`، `.git`، `docs` و متادیتای agent وارد build context نمی‌شوند.
+
+در production، `ENVIRONMENT=production` بدون `MIZAN_API_KEY`، `CORS_ORIGINS` و `MIZAN_DATA_ENCRYPTION_KEY` اجازهٔ بالا آمدن نمی‌دهد.
