@@ -20,8 +20,16 @@ from app.rate_limit import enforce_rate_limit
 from app.risk_engine import analyze_document
 from app.observability import configure_telemetry
 from app.crypto import _fernet
+from app.intelligence import check_playbook, extract_fields, normalize, risk_score
 from app.schemas import ObligationStatusUpdate, ReviewResolution
+from app.schemas import BenchmarkComparison, ClauseRule, ClauseRuleInput, ContractReviewResult, PortfolioContract, PortfolioSummary
 from app.schemas import Connector, ConnectorInput, ContractDiff, ContractVersionInput, DashboardSummary, Decision, DecisionInput, DemoRequest, DemoRequestInput, OrganizationInput, OrganizationProfile, OrganizationProfileInput, Obligation, ObligationInput, Regulation, RegulationInput, RegulatorySource, RegulatorySourceInput, Review, ReviewInput, RiskAnalysisResult, UserCreated, UserInput
+
+_FORBIDDEN_SIGNALS = {
+    "limitation-of-liability": ("بدون هیچ محدودیت", "مسئولیت نامحدود", "نامحدود"),
+    "termination": ("فسخ فوری", "بدون اطلاع"),
+    "confidentiality": ("افشای آزاد", "بدون محرمانگی"),
+}
 
 load_dotenv()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -118,6 +126,70 @@ async def analyze(file: UploadFile = File(...), principal: Principal = Depends(r
     profile = storage.get_profile(principal) or OrganizationProfile(organization_id=principal.organization_id, updated_at=date.today())
     regulations = storage.search_regulations(text[:2000], date.today().isoformat())
     return analyze_document(file.filename or "document", text, profile, regulations)
+
+
+CLM_ROLES = (Role.OWNER, Role.ADMIN, Role.ANALYST)
+READ_ROLES = (*CLM_ROLES, Role.VIEWER)
+
+
+@app.post("/clause-rules", response_model=ClauseRule)
+def save_clause_rule(value: ClauseRuleInput, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN))) -> ClauseRule:
+    return storage.upsert_clause_rule(principal, value)
+
+
+@app.get("/clause-rules", response_model=list[ClauseRule])
+def clause_rules(principal: Principal = Depends(require_role(*READ_ROLES))) -> list[ClauseRule]:
+    return storage.list_clause_rules(principal)
+
+
+@app.delete("/clause-rules/{clause_key}", status_code=204)
+def remove_clause_rule(clause_key: str, principal: Principal = Depends(require_role(Role.OWNER, Role.ADMIN))) -> None:
+    if not storage.delete_clause_rule(principal, clause_key):
+        raise HTTPException(status_code=404, detail="قاعده یافت نشد.")
+
+
+@app.post("/contracts/{contract_key}/review", response_model=ContractReviewResult)
+def review_contract(contract_key: str, version: str, principal: Principal = Depends(require_role(*CLM_ROLES))) -> ContractReviewResult:
+    """First-pass playbook check, redlines, and Persian field extraction for a stored version."""
+    with storage.connection() as db:
+        row = db.execute("SELECT body FROM contract_versions WHERE organization_id=? AND contract_key=? AND version=?", (principal.organization_id, contract_key, version)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="نسخهٔ قرارداد یافت نشد.")
+    deviations, redlines = check_playbook(row["body"], storage.list_clause_rules(principal))
+    return ContractReviewResult(contract_key=contract_key, score=risk_score(deviations), deviations=deviations, redlines=redlines, fields=extract_fields(row["body"]))
+
+
+@app.post("/contracts/{contract_key}/benchmark", response_model=list[BenchmarkComparison])
+def benchmark_contract(contract_key: str, version: str, principal: Principal = Depends(require_role(*READ_ROLES))) -> list[BenchmarkComparison]:
+    """Compare the contract's clauses against the market reference in the benchmark table."""
+    with storage.connection() as db:
+        row = db.execute("SELECT body FROM contract_versions WHERE organization_id=? AND contract_key=? AND version=?", (principal.organization_id, contract_key, version)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="نسخهٔ قرارداد یافت نشد.")
+    text = normalize(row["body"])
+    results = []
+    for entry in storage.list_benchmarks():
+        present = normalize(entry.label) in text or (entry.clause_key.replace("-", " ") in text)
+        status = "present" if present else "missing"
+        if not present and any(word in text for word in _FORBIDDEN_SIGNALS.get(entry.clause_key, ())):
+            status = "forbidden"
+        results.append(BenchmarkComparison(
+            clause_key=entry.clause_key, label=entry.label, status=status, practice=entry.practice,
+            frequency_pct=entry.frequency_pct, source=entry.source,
+            note="در بازار رایج است و در این قرارداد وجود دارد." if present else "در بازار رایج است اما در این قرارداد پیدا نشد.",
+        ))
+    return results
+
+
+@app.get("/portfolio", response_model=PortfolioSummary)
+def portfolio(principal: Principal = Depends(require_role(*READ_ROLES))) -> PortfolioSummary:
+    data = storage.portfolio(principal)
+    return PortfolioSummary(
+        organization_id=principal.organization_id,
+        contract_count=len(data["items"]), version_count=data["version_count"],
+        pending_reviews=data["pending"], overdue_obligations=data["overdue"],
+        contracts=[PortfolioContract(**item) for item in data["items"]],
+    )
 
 
 @app.get("/me")

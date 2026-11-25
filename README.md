@@ -69,6 +69,18 @@ uvicorn app.main:app --reload --port 8000
 
 این‌ها در کنار درخواست دمو، RBAC، tenant isolation، OCR، connectorهای HR/مالی و داشبورد، میزان را از یک legal chatbot به یک workspace عملیاتی نزدیک می‌کند.
 
+## Contract intelligence (rival gap closure)
+
+Five capabilities were added after comparing Iranian products (ZharfAI, ThinkPilot, Haghparvar) with international leaders (Ironclad, Spellbook, Luminance):
+
+1. **Clause playbooks** — `POST/GET /clause-rules` and `DELETE /clause-rules/{key}` store tenant positions with forbidden terms, required clauses, preferred wording, and severity.
+2. **Redline suggestions** — `POST /contracts/{key}/review?version=` returns replace/delete/insert proposals with a reason and a 0–100 compliance score.
+3. **Persian field extraction** — the same review returns amount, parties, Jalali dates, national ID, contract number, duration, and governing law, each with a line number and confidence; missing fields are omitted instead of guessed.
+4. **Market benchmarks** — `POST /contracts/{key}/benchmark?version=` compares the contract with the seeded reference set, returning present/missing/forbidden plus frequency and source.
+5. **Portfolio view** — `GET /portfolio` aggregates contracts, versions, pending reviews, and overdue obligations per tenant.
+
+Rules and benchmarks are deterministic keyword checks, not trained models, and the seeded benchmark percentages are an internal reference to be replaced with sourced market data. The dashboard exposes the portfolio and a playbook review panel.
+
 ## بررسی ساختار repository
 
 `docs/wiki/` مستندات commit‌شدهٔ repository است و `.noqte/wiki/` context اجرایی پنل؛ این دو نقش متفاوت دارند و حذف یکی بدون مهاجرت integrationها خطرناک است.

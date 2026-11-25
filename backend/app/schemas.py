@@ -212,3 +212,90 @@ class DashboardSummary(BaseModel):
     risk_distribution: dict[RiskLevel, int]
     recent_decisions: list[Decision]
     unread_alert_count: int
+
+
+class ClauseRuleInput(BaseModel):
+    clause_key: str = Field(min_length=2, max_length=80, pattern="^[a-z0-9-]+$")
+    label: str = Field(min_length=2, max_length=200)
+    forbidden_terms: list[str] = Field(default_factory=list, max_length=20)
+    required_terms: list[str] = Field(default_factory=list, max_length=20)
+    preferred_text: str | None = Field(default=None, max_length=5000)
+    severity: RiskLevel = RiskLevel.MEDIUM
+
+
+class ClauseRule(ClauseRuleInput):
+    id: int
+    updated_at: datetime
+
+
+class ClauseDeviation(BaseModel):
+    clause_key: str
+    label: str
+    kind: str = Field(pattern="^(missing|forbidden)$")
+    severity: RiskLevel
+    line: int | None = None
+    evidence: str | None = None
+    message: str
+
+
+class RedlineSuggestion(BaseModel):
+    clause_key: str
+    label: str
+    action: str = Field(pattern="^(replace|delete|insert)$")
+    line: int | None = None
+    original: str | None = None
+    replacement: str
+    reason: str
+
+
+class ExtractedField(BaseModel):
+    key: str
+    label: str
+    value: str
+    confidence: float = Field(ge=0, le=1)
+    line: int
+
+
+class ContractReviewResult(BaseModel):
+    contract_key: str | None = None
+    score: int = Field(ge=0, le=100)
+    deviations: list[ClauseDeviation]
+    redlines: list[RedlineSuggestion]
+    fields: list[ExtractedField]
+
+
+class BenchmarkEntry(BaseModel):
+    clause_key: str
+    label: str
+    practice: str
+    frequency_pct: int = Field(ge=0, le=100)
+    source: str
+
+
+class BenchmarkComparison(BaseModel):
+    clause_key: str
+    label: str
+    status: str = Field(pattern="^(present|missing|forbidden)$")
+    practice: str
+    frequency_pct: int = Field(ge=0, le=100)
+    source: str
+    note: str
+
+
+class PortfolioContract(BaseModel):
+    contract_key: str
+    versions: int
+    latest_version: str | None = None
+    opened_obligations: int = 0
+    overdue_obligations: int = 0
+    pending_reviews: int = 0
+    last_activity: datetime | None = None
+
+
+class PortfolioSummary(BaseModel):
+    organization_id: str
+    contract_count: int
+    version_count: int
+    pending_reviews: int
+    overdue_obligations: int
+    contracts: list[PortfolioContract]

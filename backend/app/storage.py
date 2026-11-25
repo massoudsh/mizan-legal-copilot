@@ -56,7 +56,17 @@ def initialize_database() -> None:
         CREATE TABLE IF NOT EXISTS connectors (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), name TEXT NOT NULL, kind TEXT NOT NULL, base_url TEXT NOT NULL, secret_reference TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS regulatory_sources (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, feed_url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_checked_at TEXT);
         CREATE TABLE IF NOT EXISTS demo_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, organization TEXT NOT NULL, work_email TEXT NOT NULL, phone TEXT, employee_count INTEGER, message TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS clause_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id TEXT NOT NULL REFERENCES organizations(id), clause_key TEXT NOT NULL, label TEXT NOT NULL, forbidden_terms TEXT NOT NULL, required_terms TEXT NOT NULL, preferred_text TEXT, severity TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(organization_id, clause_key));
+        CREATE TABLE IF NOT EXISTS clause_benchmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, clause_key TEXT NOT NULL, label TEXT NOT NULL, practice TEXT NOT NULL, frequency_pct INTEGER NOT NULL, source TEXT NOT NULL, UNIQUE(clause_key));
         """)
+        db.execute("""INSERT OR IGNORE INTO clause_benchmarks (clause_key,label,practice,frequency_pct,source) VALUES
+            ('limitation-of-liability','محدودیت مسئولیت','سقف مسئولیت برابر مبلغ قرارداد',62,'internal-reference-v1'),
+            ('termination','شرایط فسخ','فسخ با اخطار کتبی و مهلت اصلاح',88,'internal-reference-v1'),
+            ('confidentiality','محرمانگی','تعریف دامنه اطلاعات و مدت تعهد',91,'internal-reference-v1'),
+            ('payment-terms','شرایط پرداخت','پرداخت مرحله‌ای با مهلت مشخص',85,'internal-reference-v1'),
+            ('governing-law','قانون حاکم','قانون ایران و مرجع حل اختلاف صریح',76,'internal-reference-v1'),
+            ('force-majeure','فورس ماژور','تعریف رویداد و رویه اعلام',71,'internal-reference-v1'),
+            ('renewal','تمدید','تمدید کتبی با اخطار پیش از انقضا',58,'internal-reference-v1')""")
         columns = {row[1] for row in db.execute("PRAGMA table_info(regulations)")}
         if "trust_score" not in columns:
             db.execute("ALTER TABLE regulations ADD COLUMN trust_score INTEGER NOT NULL DEFAULT 50")
@@ -275,6 +285,88 @@ def create_demo_request(value: DemoRequestInput) -> DemoRequest:
     with connection() as db:
         result = db.execute("INSERT INTO demo_requests(name,organization,work_email,phone,employee_count,message,created_at) VALUES(?,?,?,?,?,?,?)", (value.name, value.organization, encrypt(str(value.work_email)), encrypt(value.phone), value.employee_count, encrypt(value.message), timestamp.isoformat()))
     return DemoRequest(id=result.lastrowid, created_at=timestamp)
+
+
+def upsert_clause_rule(principal: Principal, value) -> object:
+    """Replace the tenant's position for a clause; term lists stay JSON encoded."""
+    import json
+
+    from app.schemas import ClauseRule
+
+    timestamp = now()
+    with connection() as db:
+        db.execute(
+            """INSERT INTO clause_rules (organization_id,clause_key,label,forbidden_terms,required_terms,preferred_text,severity,updated_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(organization_id, clause_key) DO UPDATE SET
+            label=excluded.label, forbidden_terms=excluded.forbidden_terms, required_terms=excluded.required_terms,
+            preferred_text=excluded.preferred_text, severity=excluded.severity, updated_at=excluded.updated_at""",
+            (principal.organization_id, value.clause_key, value.label, json.dumps(value.forbidden_terms, ensure_ascii=False), json.dumps(value.required_terms, ensure_ascii=False), value.preferred_text, value.severity.value, timestamp.isoformat()),
+        )
+        rule_id = db.execute("SELECT id FROM clause_rules WHERE organization_id=? AND clause_key=?", (principal.organization_id, value.clause_key)).fetchone()["id"]
+    return ClauseRule(**value.model_dump(), id=rule_id, updated_at=timestamp)
+
+
+def list_clause_rules(principal: Principal) -> list:
+    import json
+
+    from app.schemas import ClauseRule
+    with connection() as db:
+        rows = db.execute("SELECT id,clause_key,label,forbidden_terms,required_terms,preferred_text,severity,updated_at FROM clause_rules WHERE organization_id=? ORDER BY clause_key", (principal.organization_id,)).fetchall()
+    return [ClauseRule(**{**dict(row), "forbidden_terms": json.loads(row["forbidden_terms"]), "required_terms": json.loads(row["required_terms"])}) for row in rows]
+
+
+def delete_clause_rule(principal: Principal, clause_key: str) -> bool:
+    with connection() as db:
+        result = db.execute("DELETE FROM clause_rules WHERE organization_id=? AND clause_key=?", (principal.organization_id, clause_key))
+    return result.rowcount == 1
+
+
+def upsert_benchmark(clause_key: str, label: str, practice: str, frequency_pct: int, source: str) -> None:
+    with connection() as db:
+        db.execute(
+            """INSERT INTO clause_benchmarks (clause_key,label,practice,frequency_pct,source) VALUES (?,?,?,?,?)
+            ON CONFLICT(clause_key) DO UPDATE SET label=excluded.label, practice=excluded.practice,
+            frequency_pct=excluded.frequency_pct, source=excluded.source""",
+            (clause_key, label, practice, frequency_pct, source),
+        )
+
+
+def list_benchmarks() -> list:
+    from app.schemas import BenchmarkEntry
+    with connection() as db:
+        rows = db.execute("SELECT clause_key,label,practice,frequency_pct,source FROM clause_benchmarks ORDER BY clause_key").fetchall()
+    return [BenchmarkEntry(**dict(row)) for row in rows]
+
+
+def portfolio(principal: Principal) -> dict:
+    """Aggregate the tenant's contract portfolio in one query set."""
+    with connection() as db:
+        contracts = db.execute(
+            """SELECT contract_key, count(*) AS versions, max(created_at) AS last_activity FROM contract_versions
+            WHERE organization_id=? GROUP BY contract_key ORDER BY last_activity DESC""",
+            (principal.organization_id,),
+        ).fetchall()
+        latest = {row["contract_key"]: row["version"] for row in db.execute(
+            """SELECT contract_key, version FROM contract_versions v WHERE organization_id=?
+            AND created_at=(SELECT max(created_at) FROM contract_versions WHERE organization_id=v.organization_id AND contract_key=v.contract_key)""",
+            (principal.organization_id,),
+        )}
+        obligations = db.execute(
+            """SELECT count(*) AS overdue FROM obligations WHERE organization_id=? AND status!='done' AND due_on < ?""",
+            (principal.organization_id, now().date().isoformat()),
+        ).fetchone()["overdue"]
+        pending = db.execute("SELECT count(*) AS pending FROM reviews WHERE organization_id=? AND status='pending'", (principal.organization_id,)).fetchone()["pending"]
+    items = [{
+        "contract_key": row["contract_key"],
+        "versions": row["versions"],
+        "latest_version": latest.get(row["contract_key"]),
+        "opened_obligations": 0,
+        "overdue_obligations": 0,
+        "pending_reviews": 0,
+        "last_activity": row["last_activity"],
+    } for row in contracts]
+    return {"items": items, "overdue": obligations, "pending": pending, "version_count": sum(item["versions"] for item in items)}
 
 
 def dashboard(principal: Principal):

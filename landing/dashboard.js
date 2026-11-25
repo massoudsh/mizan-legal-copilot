@@ -22,8 +22,8 @@ async function api(path, options = {}) {
 
 async function loadDashboard() {
   const currentSession = session;
-  const [data, identity, obligations, reviews] = await Promise.all([
-    api("/dashboard"), api("/me"), api("/obligations"), api("/reviews"),
+  const [data, identity, obligations, reviews, portfolio] = await Promise.all([
+    api("/dashboard"), api("/me"), api("/obligations"), api("/reviews"), api("/portfolio"),
   ]);
   if (currentSession !== session) return false;
   const canWrite = ["owner", "admin", "analyst"].includes(identity.role);
@@ -34,6 +34,7 @@ async function loadDashboard() {
   document.querySelector("#recent-decisions").innerHTML = data.recent_decisions.length ? data.recent_decisions.map((decision) => `<article class="decision-row"><strong>${escapeHtml(decision.title)}</strong><span>${escapeHtml(labels[decision.risk_level])} · ${new Date(decision.created_at).toLocaleDateString("fa-IR")}</span></article>`).join("") : "<p>هنوز تصمیمی ثبت نشده است.</p>";
   document.querySelector("#obligations").innerHTML = obligations.length ? obligations.map((item) => `<article class="decision-row"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.due_on)} · ${escapeHtml(labels[item.status])}</span>${canWrite ? `<label>وضعیت تعهد<select data-obligation="${Number(item.id)}">${["open", "in_progress", "done", "overdue"].map((value) => `<option value="${value}" ${value === item.status ? "selected" : ""}>${labels[value]}</option>`).join("")}</select></label>` : ""}</article>`).join("") : "<p>تعهدی ثبت نشده است.</p>";
   document.querySelector("#reviews").innerHTML = reviews.length ? reviews.map((item) => `<article class="decision-row"><strong>تصمیم ${Number(item.decision_id).toLocaleString("fa-IR")}</strong><span>${escapeHtml(item.reviewer_email)} · ${escapeHtml(labels[item.status])}</span>${canWrite && item.status === "pending" && item.reviewer_email.toLowerCase() === identity.email.toLowerCase() ? `<button type="button" data-review="${Number(item.id)}" data-resolution="approved">تأیید</button> <button type="button" data-review="${Number(item.id)}" data-resolution="rejected">رد</button>` : ""}</article>`).join("") : "<p>بررسی‌ای ثبت نشده است.</p>";
+  document.querySelector("#portfolio").innerHTML = portfolio.contracts.length ? portfolio.contracts.map((item) => `<article class="decision-row"><strong>${escapeHtml(item.contract_key)}</strong><span>${Number(item.versions).toLocaleString("fa-IR")} نسخه · آخرین: ${escapeHtml(item.latest_version || "—")}</span></article>`).join("") : "<p>هنوز قراردادی ثبت نشده است.</p>";
   return true;
 }
 
@@ -83,6 +84,24 @@ document.querySelector("#reviews").addEventListener("click", (event) => {
   const control = event.target.closest("[data-review]");
   if (control) updateItem(control, `/reviews/${control.dataset.review}`, { status: control.dataset.resolution });
 });
+document.querySelector("#review-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formEl = event.currentTarget;
+  const values = new FormData(formEl);
+  const key = values.get("contract_key").trim();
+  const version = values.get("version").trim();
+  const result = document.querySelector("#review-result");
+  result.textContent = "در حال بازبینی…";
+  try {
+    const data = await api(`/contracts/${encodeURIComponent(key)}/review?version=${encodeURIComponent(version)}`, { method: "POST" });
+    result.innerHTML = `<p class="review-score">امتیاز انطباق: ${Number(data.score).toLocaleString("fa-IR")} از ۱۰۰</p>` +
+      (data.deviations.length ? data.deviations.map((item) => `<article class="decision-row"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.message)}</span></article>`).join("") : "<p>انحراف از playbook یافت نشد.</p>") +
+      (data.redlines.length ? `<h3>پیشنهاد اصلاح</h3>` + data.redlines.map((item) => `<article class="decision-row"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.reason)}</span><span>${escapeHtml(item.replacement)}</span></article>`).join("") : "");
+  } catch (error) {
+    result.textContent = error.message;
+  }
+});
+
 document.querySelector("#audit-export").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   const currentSession = session;

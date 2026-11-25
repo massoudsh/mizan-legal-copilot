@@ -20,6 +20,7 @@ function workspace(role = "analyst") {
     "/dashboard": { decision_count: 55, critical_decision_count: 2, unread_alert_count: 1, risk_distribution: { high: 2 }, recent_decisions: [] },
     "/obligations": [{ id: 1, title: "<script>unsafe</script>", due_on: "2027-01-01", status: "open" }],
     "/reviews": [{ id: 1, decision_id: 1, reviewer_email: "reviewer@example.com", status: "pending" }, { id: 2, decision_id: 2, reviewer_email: "other@example.com", status: "pending" }],
+    "/portfolio": { contracts: [{ contract_key: "<b>alpha</b>", versions: 2, latest_version: "2" }] },
   };
   const context = vm.createContext({
     document: { querySelector: element, getElementById: (id) => element(`#${id}`) },
@@ -35,6 +36,7 @@ test("viewers see escaped records without mutation controls", async () => {
   assert.match(element("#obligations").innerHTML, /&lt;script&gt;/);
   assert.doesNotMatch(element("#obligations").innerHTML, /<select/);
   assert.doesNotMatch(element("#reviews").innerHTML, /data-review/);
+  assert.match(element("#portfolio").innerHTML, /&lt;b&gt;alpha&lt;\/b&gt;/);
 });
 
 test("analysts can update obligations and only their assigned pending review", async () => {
